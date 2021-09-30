@@ -12,6 +12,8 @@
 
     #include "reaxff_list.h"
     #include "reaxff_vector.h"
+#include "reaxff_hip_list.h"
+
 #endif
 
 extern "C" void Output_Sync_Forces(storage *workspace, int total_cap) {
@@ -202,6 +204,78 @@ extern "C" void Hip_Copy_List_Device_to_Host( reax_list *host_list, reax_list *d
             break;
     }  
 }
+
+//extern "C" void Hip_Copy_List_Host_to_Device( reax_list *host_list, reax_list *device_list, int type )
+//{
+//    int format;
+//
+//    //    assert( device_list != NULL );
+//    //    assert( device_list->allocated == TRUE );
+//
+//    format = host_list->format;
+//
+//    if ( host_list != NULL && host_list->allocated == TRUE )
+//    {
+//        Delete_List( host_list );
+//    }
+//    Hip_Make_List( device_list->n, device_list->max_intrs, type, format, host_list );
+//
+//#if defined(DEBUG_FOCUS)
+//    fprintf( stderr, " [INFO] trying to copy %d list from device to host\n", type );
+//#endif
+//
+//    sHipMemcpy( host_list->index, device_list->index,
+//                sizeof(int) * device_list->n,
+//                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//    sHipMemcpy( host_list->end_index, device_list->end_index,
+//                sizeof(int) * device_list->n,
+//                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//
+//    switch ( type )
+//    {
+//        case TYP_FAR_NEIGHBOR:
+//            sHipMemcpy( host_list->far_nbr_list.nbr, device_list->far_nbr_list.nbr,
+//                        sizeof(int) * device_list->max_intrs,
+//                        hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//            sHipMemcpy( host_list->far_nbr_list.rel_box, device_list->far_nbr_list.rel_box,
+//                        sizeof(ivec) * device_list->max_intrs,
+//                        hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//            sHipMemcpy( host_list->far_nbr_list.d, device_list->far_nbr_list.d,
+//                        sizeof(real) * device_list->max_intrs,
+//                        hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//            sHipMemcpy( host_list->far_nbr_list.dvec, device_list->far_nbr_list.dvec,
+//                        sizeof(rvec) * device_list->max_intrs,
+//                        hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//            break;
+//
+//            case TYP_BOND:
+//                sHipMemcpy( host_list->bond_list, device_list->bond_list,
+//                            sizeof(bond_data) * device_list->max_intrs,
+//                            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//                break;
+//
+//                case TYP_HBOND:
+//                    sHipMemcpy( host_list->hbond_list, device_list->hbond_list,
+//                                sizeof(hbond_data) * device_list->max_intrs,
+//                                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//                    break;
+//
+//                    case TYP_THREE_BODY:
+//                        sHipMemcpy( host_list->three_body_list,
+//                                    device_list->three_body_list,
+//                                    sizeof(three_body_interaction_data ) * device_list->max_intrs,
+//                                    hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+//                        break;
+//
+//                        default:
+//                            fprintf( stderr, "[ERROR] Unknown list synching from device to host (%d)\n",
+//                                     type );
+//                            exit( INVALID_INPUT );
+//                            break;
+//    }
+//}
+
+
 
 /* Copy atom info from device to host */
 extern "C" void Hip_Copy_MPI_Data_Host_to_Device( mpi_datatypes *mpi_data )

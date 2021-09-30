@@ -93,6 +93,63 @@ extern "C" void Hip_Make_List( int n, int max_intrs, int type, reax_list * const
 }
 
 
+void Hip_Copy_Far_Neighbors_List_Host_to_Device(reax_system *system, reax_list **gpu_lists, reax_list *cpu_lists) {
+    // Check if both lists are allocated
+//    if (gpu_lists[FAR_NBRS]->allocated & (cpu_lists+FAR_NBRS)->allocated) {
+//        fprintf( stderr, "[ERROR] One or Two of the lists were not allocated.\n"
+//                         "GPU List allocation: %d, CPU List allocation: %d", gpu_lists[FAR_NBRS]->allocated,
+//                         (cpu_lists+FAR_NBRS)->allocated);
+//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
+//    }
+//    // Check if they're the same type
+//    if (gpu_lists[FAR_NBRS]->type == (cpu_lists+FAR_NBRS)->type) {
+//        fprintf( stderr, "[ERROR] The lists don't have the same type.\n"
+//                         "GPU List type: %d, CPU List type: %d", gpu_lists[FAR_NBRS]->type,
+//                         (cpu_lists+FAR_NBRS)->type);
+//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
+//    }
+//    // Check if they're the same size
+//    if (gpu_lists[FAR_NBRS]->n == (cpu_lists+FAR_NBRS)->n) {
+//        fprintf( stderr, "[ERROR] The lists are not of the same size.\n"
+//                         "GPU List size: %d, CPU List size: %d", gpu_lists[FAR_NBRS]->n,
+//                         (cpu_lists+FAR_NBRS)->n);
+//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
+//    }
+//    // Check if they have the same capacity
+//    if (gpu_lists[FAR_NBRS]->max_intrs == (cpu_lists+FAR_NBRS)->max_intrs) {
+//        fprintf( stderr, "[ERROR] The lists don't have the same max size.\n"
+//                         "GPU List max size: %d, CPU List max size: %d", gpu_lists[FAR_NBRS]->max_intrs,
+//                         (cpu_lists+FAR_NBRS)->max_intrs);
+//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
+//    }
+    sHipMemcpy((cpu_lists+FAR_NBRS)->index, gpu_lists[FAR_NBRS]->index,
+               system->total_cap * sizeof(int),
+               hipMemcpyHostToDevice, __FILE__,
+               __LINE__);
+    sHipMemcpy( (cpu_lists+FAR_NBRS)->end_index, gpu_lists[FAR_NBRS]->end_index,
+                system->total_cap * sizeof(int),
+                hipMemcpyHostToDevice, __FILE__,
+                __LINE__);
+    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.nbr, gpu_lists[FAR_NBRS]->far_nbr_list.nbr,
+                system->total_far_nbrs * sizeof(int),
+                hipMemcpyHostToDevice, __FILE__,
+                __LINE__);
+    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.rel_box, gpu_lists[FAR_NBRS]->far_nbr_list.rel_box,
+                system->total_far_nbrs * sizeof(ivec),
+                hipMemcpyHostToDevice, __FILE__,
+                __LINE__);
+    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.d, gpu_lists[FAR_NBRS]->far_nbr_list.d,
+                system->total_far_nbrs * sizeof(real),
+                hipMemcpyHostToDevice, __FILE__,
+                __LINE__);
+    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.dvec, gpu_lists[FAR_NBRS]->far_nbr_list.dvec,
+                system->total_far_nbrs * sizeof(rvec),
+                hipMemcpyHostToDevice, __FILE__,
+                __LINE__);
+};
+
+
+
 extern "C" void Hip_Delete_List( reax_list *l )
 {
     if ( l->allocated == FALSE )

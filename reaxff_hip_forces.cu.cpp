@@ -1762,27 +1762,27 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
 
     if ( realloc_cm == TRUE )
     {
-        blocks = workspace->d_workspace->H.n_max / DEF_BLOCK_SIZE
-            + (workspace->d_workspace->H.n_max % DEF_BLOCK_SIZE == 0 ? 0 : 1);
+        blocks = system->total_cap / DEF_BLOCK_SIZE
+            + (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
         if ( workspace->d_workspace->H.format == SYM_HALF_MATRIX )
         {
             hipLaunchKernelGGL(k_estimate_storages_cm_half, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, (control_params *) control->d_control_params,
-                  *(lists[FAR_NBRS]), system->n,
-                  system->N,
+                  *(lists[FAR_NBRS]), system->N,
+                  system->total_cap,
                   system->d_cm_entries, system->d_max_cm_entries );
         }
         else
         {
             hipLaunchKernelGGL(k_estimate_storages_cm_full, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (control_params *) control->d_control_params,
-                  *(lists[FAR_NBRS]), workspace->d_workspace->H.n,
-                  workspace->d_workspace->H.n_max,
+                  *(lists[FAR_NBRS]), system->N,
+                  system->total_cap,
                   system->d_cm_entries, system->d_max_cm_entries );
         }
         hipCheckError( );
 
         Hip_Reduction_Sum( system->d_max_cm_entries,
-                system->d_total_cm_entries, workspace->d_workspace->H.n_max );
+                system->d_total_cm_entries, system->total_cap );
         sHipMemcpy( &system->total_cm_entries, system->d_total_cm_entries,
                 sizeof(int), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
     }

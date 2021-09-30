@@ -75,5 +75,8 @@ int Hip_PIPECR( reax_system const * const, control_params const * const,
         sparse_matrix const * const, real const * const, real,
         real * const, mpi_datatypes * const );
 
+void Sparse_MatVec_local( control_params const * const control,
+                                 sparse_matrix const * const A, real const * const x,
+                                 real * const b, int n );
 
 #endif

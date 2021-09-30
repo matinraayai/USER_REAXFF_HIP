@@ -33,6 +33,7 @@
     #include "reaxff_hip_neighbors.h"
     #include "reaxff_hip_reset_tools.h"
     #include "reaxff_hip_system_props.h"
+    #include "reaxff_hip_utils.h"
 
     #include "reaxff_box.h"
     #include "reaxff_comm_tools.h"
@@ -220,20 +221,20 @@ void Hip_Init_Lists( reax_system *system, control_params *control,
             TYP_FAR_NEIGHBOR, lists[FAR_NBRS] );
     Hip_Init_Neighbor_Indices( system, lists[FAR_NBRS] );
 
-    Hip_Generate_Neighbor_Lists( system, data, workspace, lists );
+//    Hip_Generate_Neighbor_Lists( system, data, workspace, lists );
 
     /* first call to Hip_Estimate_Storages requires setting these manually before allocation */
-    workspace->d_workspace->H.n = system->n;
-    workspace->d_workspace->H.n_max = system->local_cap;
-    workspace->d_workspace->H.format = SYM_FULL_MATRIX;
+//    workspace->d_workspace->H.n = system->n;
+//    workspace->d_workspace->H.n_max = system->local_cap;
+//    workspace->d_workspace->H.format = SYM_FULL_MATRIX;
+//
+//    /* estimate storage for bonds, hbonds, and sparse matrix */
+//    Hip_Estimate_Storages( system, control, workspace, lists,
+//            TRUE, TRUE, TRUE, data->step - data->prev_steps );
 
-    /* estimate storage for bonds, hbonds, and sparse matrix */
-    Hip_Estimate_Storages( system, control, workspace, lists,
-            TRUE, TRUE, TRUE, data->step - data->prev_steps );
-
-    Hip_Allocate_Matrix( &workspace->d_workspace->H, system->n,
-            system->local_cap, system->total_cm_entries, SYM_FULL_MATRIX );
-    Hip_Init_Sparse_Matrix_Indices( system, &workspace->d_workspace->H );
+//    Hip_Allocate_Matrix( &workspace->d_workspace->H, system->n,
+//            system->local_cap, system->total_cm_entries, SYM_FULL_MATRIX );
+//    Hip_Init_Sparse_Matrix_Indices( system, &workspace->d_workspace->H );
 
     Hip_Make_List( system->total_cap, system->total_bonds, TYP_BOND, lists[BONDS] );
     Hip_Init_Bond_Indices( system, lists[BONDS] );

@@ -13,6 +13,7 @@
 #include "reaxff_vector.h"
 #include "reaxff_hip_fix_qeq.h"
 #include "reaxff_hip_forces.h"
+//#include "reaxff_hip_spar_lin_alg.h"
 
 extern "C"
 {
@@ -122,7 +123,7 @@ HIP_DEVICE real Init_Charge_Matrix_Entry(real *workspace_Tap,
 
 
 HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
-                                   reax_list far_nbr_list, sparse_matrix* H,
+                                   reax_list far_nbr_list, sparse_matrix H,
                                    control_params *control, int n, double *d_Tap, double *gamma,
                                    int *max_cm_entries, int *realloc_cm_entries)
                                    {
@@ -143,14 +144,14 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if ( i >= H->n_max)
+    if ( i >= H.n_max)
     {
         return;
     }
 
-    cm_top = H->start[i];
+    cm_top = H.start[i];
 
-    if (i < H->n) {
+    if (i < H.n) {
 
         atom_i = &my_atoms[i];
         type_i = atom_i->type;
@@ -158,8 +159,8 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
         end_i = End_Index(i, &far_nbr_list );
 
         /* diagonal entry in the matrix */
-        H->j[cm_top] = i;
-        H->val[cm_top] = Init_Charge_Matrix_Entry(d_Tap,
+        H.j[cm_top] = i;
+        H.val[cm_top] = Init_Charge_Matrix_Entry(d_Tap,
                                                   i, i, 0.0, 0.0);
         ++cm_top;
 
@@ -169,17 +170,17 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
 
             if ( far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut)
             {
-                //if ( i == 500)
-                //printf("%d,%d,%f,%f\n", i, j, nbr_pj->d,nonb_cut);
+                if ( i == 500)
+                    printf("%d,%d,%f,%f\n", i, j, nbr_pj->d, control->nonb_cut);
                 j = far_nbr_list.far_nbr_list.nbr[pj];
                 atom_j = &my_atoms[j];
                 type_j = atom_j->type;
 
                 r_ij = far_nbr_list.far_nbr_list.d[pj];
 
-                H->j[cm_top] = j;
+                H.j[cm_top] = j;
                 shld = pow( gamma[type_i] * gamma[type_j], -1.5);
-                H->val[cm_top] = Init_Charge_Matrix_Entry(d_Tap, i, j, r_ij, shld);
+                H.val[cm_top] = Init_Charge_Matrix_Entry(d_Tap, i, j, r_ij, shld);
                 ++cm_top;
 
             }
@@ -189,8 +190,8 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
     __syncthreads();
 
 
-    H->end[i] = cm_top;
-    num_cm_entries = cm_top - H->start[i];
+    H.end[i] = cm_top;
+    num_cm_entries = cm_top - H.start[i];
 
     /* reallocation check */
     if ( num_cm_entries > max_cm_entries[i] )
@@ -222,9 +223,10 @@ void  Hip_Calculate_H_Matrix(reax_list **lists,  reax_system *system, fix_qeq_gp
 	//printf("N %d, h n %d \n",system->N, qeq_gpu->H.n);
 
 	hipLaunchKernelGGL(k_init_cm_full_fs , dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0,  qeq_gpu->d_fix_my_atoms,
-                       *(lists[FAR_NBRS]), &(qeq_gpu->H), (control_params *) control->d_control_params, n, qeq_gpu->d_Tap,qeq_gpu->gamma,
+                       *(lists[FAR_NBRS]), qeq_gpu->H, (control_params *) control->d_control_params, n, qeq_gpu->d_Tap,qeq_gpu->gamma,
                        qeq_gpu->d_max_cm_entries,
                        qeq_gpu->d_realloc_cm_entries);
+	hipCheckError();
 	hipDeviceSynchronize();
 
 
@@ -255,14 +257,15 @@ void Hip_Estimate_CMEntries_Storages( reax_system *system, control_params *contr
 			n * sizeof(int), TRUE, "system:d_cm_entries" );
 	hip_malloc( (void **) &qeq_gpu->d_total_cm_entries,
 			n * sizeof(int), TRUE, "system:d_cm_entries" );
-
+    hip_malloc( (void **) &qeq_gpu->d_realloc_cm_entries,
+                sizeof(int), TRUE, "system:d_realloc_cm_entries");
 
 	blocks = n / DEF_BLOCK_SIZE +
 			(((n % DEF_BLOCK_SIZE == 0)) ? 0 : 1);
 
 	hipLaunchKernelGGL(k_estimate_storages_cm_full, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0,
                        (control_params *)control->d_control_params,
-			*(lists[FAR_NBRS]), n, n,
+			*(lists[FAR_NBRS]), n + 1, n,
 			qeq_gpu->d_cm_entries, qeq_gpu->d_max_cm_entries);
 	hipDeviceSynchronize();
 	hipCheckError();
@@ -397,8 +400,6 @@ HIP_GLOBAL void k_update_q(double *temp_buf, double *q, int nn)
 
 	q[i] = q[i] +  temp_buf[i];
 
-	//printf("m: %d %f\n",i, q[i]);
-
 }
 
 void  Hip_UpdateQ_And_Copy_To_Device_Comm_Fix(double *buf,fix_qeq_gpu *qeq_gpu,int nn)
@@ -413,7 +414,6 @@ void  Hip_UpdateQ_And_Copy_To_Device_Comm_Fix(double *buf,fix_qeq_gpu *qeq_gpu,i
 
 	blocks = nn / DEF_BLOCK_SIZE
 			+ (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
-	//printf("Blocks %d \n",blocks);
 
 
 	hipLaunchKernelGGL(k_update_q, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, temp_buf,qeq_gpu->q,nn);
@@ -423,8 +423,7 @@ void  Hip_UpdateQ_And_Copy_To_Device_Comm_Fix(double *buf,fix_qeq_gpu *qeq_gpu,i
 
 
 
-HIP_GLOBAL void k_matvec_csr_fix( sparse_matrix* H, real *vec, real *results,
-		int num_rows)
+HIP_GLOBAL void k_matvec_csr_fix( sparse_matrix* H, real *vec, real *results, int num_rows)
 {
 
 	int i, c, col;
@@ -502,24 +501,21 @@ void Hip_Sparse_Matvec_Compute(sparse_matrix *H,double *x, double *q, double *et
 
 	blocks = NN / DEF_BLOCK_SIZE
 			+ (( NN % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
-	//printf("Blocks %d \n",blocks);
 
 
-	hipLaunchKernelGGL(k_init_q, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, d_fix_my_atoms,q,x,eta,nn,NN);
+	hipLaunchKernelGGL(k_init_q, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, d_fix_my_atoms, q, x, eta, nn, NN);
 	hipDeviceSynchronize();
 
 
-
-	blocks = nn / DEF_BLOCK_SIZE
-			+ (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
-	//printf("Blocks %d \n",blocks);
-
-
-	hipLaunchKernelGGL(k_matvec_csr_fix, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0 , 0, H, x, q, nn);
+    Sparse_MatVec_local(nullptr, H, x, q, nn);
+//	blocks = nn / DEF_BLOCK_SIZE
+//	        + (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
+//
+//
+//	hipLaunchKernelGGL(k_matvec_csr_fix, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0 , 0, H, x, q, nn);
 	hipDeviceSynchronize();
 	hipCheckError();
 
-	//printf("\n\n");
 }
 
 void Hip_Vector_Sum_Fix( real *res, real a, real *x, real b, real *y, int count )
@@ -581,8 +577,7 @@ float  Hip_Calculate_Local_S_Sum(int nn,fix_qeq_gpu *qeq_gpu)
 	int blocks;
 	real *output;
 	//hip malloc this
-	hip_malloc((void **) &output, sizeof(real), TRUE,
-			"Hip_Allocate_Matrix::start");
+	hip_malloc((void **) &output, sizeof(real), TRUE, "Hip_Allocate_Matrix::start");
 	double my_acc;
 
 
@@ -594,8 +589,7 @@ float  Hip_Calculate_Local_S_Sum(int nn,fix_qeq_gpu *qeq_gpu)
 
 	my_acc = 0;
 
-	sHipMemcpy( &my_acc, output,
-                sizeof(real), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+	sHipMemcpy( &my_acc, output, sizeof(real), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
 
 	return my_acc;
 }

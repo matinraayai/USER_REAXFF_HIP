@@ -818,7 +818,7 @@ static void Sparse_MatVec_Comm_Part1( const reax_system * const system,
  * b (output): dense vector
  * n: number of entries in b
  */
-static void Sparse_MatVec_local( control_params const * const control,
+void Sparse_MatVec_local( control_params const * const control,
         sparse_matrix const * const A, real const * const x,
         real * const b, int n )
 {

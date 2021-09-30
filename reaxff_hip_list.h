@@ -57,7 +57,7 @@ static inline HIP_HOST_DEVICE void Hip_Set_End_Index( int i, int val, reax_list 
 
 void Hip_Adjust_End_Index_Before_ReAllocation(int oldN, int systemN, reax_list **gpu_lists);
 
-
+void Hip_Copy_Far_Neighbors_List_Host_to_Device(reax_system *system, reax_list **gpu_lists, reax_list *cpu_lists);
 
 void Hip_Make_List( int, int, int, reax_list * );
 

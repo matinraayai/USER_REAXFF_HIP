@@ -48,7 +48,7 @@
 #include "reaxff_list.h"
 
 #include "reaxff_hip_forces.h"
-
+#include "reaxff_hip_list.h"
 //extern "C" void  HipAllocateStorageForFixQeq(int nmax, int dual_enabled, fix_qeq_gpu *qeq_gpu);
 //extern "C" void  HipInitStorageForFixQeq(fix_qeq_gpu *qeq_gpu,double *Hdia_inv, double *b_s,double *b_t,double *b_prc,double *b_prm,double *s,double *t, int NN);
 //extern "C" void  Hip_Calculate_H_Matrix(reax_list **gpu_lists,  reax_system *system,fix_qeq_gpu *qeq_gpu, control_params *control, int inum, int SMALL);
@@ -128,7 +128,7 @@ FixQEqReax::FixQEqReax(LAMMPS *lmp, int narg, char **arg) :
 		if (strcmp(arg[8],"dual") == 0) dual_enabled = 1;
 		else error->all(FLERR,"Illegal fix qeq/reax command");
 	}
-	shld = NULL;
+//	shld = NULL;
 
 	n = n_cap = 0;
 	N = nmax = 0;
@@ -200,7 +200,7 @@ FixQEqReax::~FixQEqReax()
 	deallocate_storage();
 	deallocate_matrix();
 
-	memory->destroy(shld);
+//	memory->destroy(shld);
 
 	if (!reaxflag) {
 		memory->destroy(chi);
@@ -433,17 +433,17 @@ void FixQEqReax::init_shielding()
 
 
 	ntypes = atom->ntypes;
-	if (shld == NULL)
-		memory->create(shld,ntypes+1,ntypes+1,"qeq:shielding");
+//	if (shld == NULL)
+//		memory->create(shld,ntypes+1,ntypes+1,"qeq:shielding");
 
 
-	for (i = 1; i <= ntypes; ++i)
-	{
-		for (j = 1; j <= ntypes; ++j)
-		{
-			shld[i][j] = pow( gamma[i] * gamma[j], -1.5);
-		}
-	}
+//	for (i = 1; i <= ntypes; ++i)
+//	{
+//		for (j = 1; j <= ntypes; ++j)
+//		{
+//			shld[i][j] = pow( gamma[i] * gamma[j], -1.5);
+//		}
+//	}
 }
 
 /* ---------------------------------------------------------------------- */
@@ -750,8 +750,8 @@ int FixQEqReax::updateReaxLists(PairReaxCGPU *reaxc)
 	//printf("freeing\n");
 	free( dist );
 
-//	Hip_Write_Reax_Lists(reaxc->system,  reaxc->gpu_lists, reaxc->cpu_lists);
-	//return num_nbrs;
+	Hip_Copy_Far_Neighbors_List_Host_to_Device(reaxc->system,  reaxc->gpu_lists, reaxc->cpu_lists);
+	return num_nbrs;
 }
 
 
@@ -782,7 +782,7 @@ void FixQEqReax::compute_H()
 	intializeAtomsAndCopyToDevice();
 	updateReaxLists(reaxc);
 	Hip_Estimate_CMEntries_Storages(reaxc->system, reaxc->control,reaxc->gpu_lists, qeq_gpu, inum);
-	Hip_Allocate_Matrix(&qeq_gpu->H, inum, nmax, reaxc->system->total_cm_entries, HALF_LIST);
+	Hip_Allocate_Matrix(&qeq_gpu->H, inum, nmax, reaxc->system->total_cm_entries, SYM_FULL_MATRIX);
 	Hip_Init_Sparse_Matrix_Indices(reaxc->system, &qeq_gpu->H);
 	Hip_Calculate_H_Matrix(reaxc->gpu_lists, reaxc->system,qeq_gpu,reaxc->control,inum);
 

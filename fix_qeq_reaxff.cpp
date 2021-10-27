@@ -165,7 +165,7 @@ FixQEqReax::FixQEqReax(LAMMPS *lmp, int narg, char **arg) :
 	// register with Atom class
 
 	reaxc = NULL;
-	reaxc = (PairReaxCGPU *) force->pair_match("^reax/c/gpu",0);
+	reaxc = (PairReaxFFHIP *) force->pair_match("^reax/f/hip", 0);
 
 	s_hist = t_hist = NULL;
 	grow_arrays(atom->nmax);
@@ -234,10 +234,10 @@ int FixQEqReax::setmask()
 
 void FixQEqReax::pertype_parameters(char *arg)
 {
-	if (strcmp(arg,"reax/c/gpu") == 0) {
+	if (strcmp(arg,"reax/f/hip") == 0) {
 		reaxflag = 1;
-		Pair *pair = force->pair_match("reax/c/gpu",0);
-		if (pair == NULL) error->all(FLERR,"No pair reax/c/gpu for fix qeq/reax");
+		Pair *pair = force->pair_match("reax/f/hip",0);
+		if (pair == NULL) error->all(FLERR,"No pair reax/f/hip for fix qeq/reax");
 
 		int tmp;
 		chi = (double *) pair->extract("chi",tmp);
@@ -245,13 +245,13 @@ void FixQEqReax::pertype_parameters(char *arg)
 		gamma = (double *) pair->extract("gamma",tmp);
 		if (chi == NULL || eta == NULL || gamma == NULL)
 			error->all(FLERR,
-					"Fix qeq/reax could not extract params from pair reax/c/gpu");
+					"Fix qeq/reax could not extract params from pair reax/f/hip");
 
 		Hip_Copy_Pertype_Parameters_To_Device(chi,eta,gamma,atom->ntypes,qeq_gpu);
 		return;
 	}
 
-	printf("Arg should be reax/c/gpu");
+	printf("Arg should be reax/f/hip");
 	exit(EXIT_FAILURE);
 }
 
@@ -670,7 +670,7 @@ void FixQEqReax::set_far_nbr( far_neighbor_data *fdest, int dest_idx,
 
 
 
-int FixQEqReax::updateReaxLists(PairReaxCGPU *reaxc)
+int FixQEqReax::updateReaxLists(PairReaxFFHIP *reaxc)
 {
 	int itr_i, itr_j, i, j;
 	int num_nbrs;
@@ -709,9 +709,9 @@ int FixQEqReax::updateReaxLists(PairReaxCGPU *reaxc)
 		Set_Start_Index( i, num_nbrs, far_nbrs );
 
 		if (i < inum)
-			cutoff_sqr = reaxc->control->nonb_cut*reaxc->control->nonb_cut;
+			cutoff_sqr = reaxc->control->nonb_cut * reaxc->control->nonb_cut;
 		else
-			cutoff_sqr = reaxc->control->bond_cut*reaxc->control->bond_cut;
+			cutoff_sqr = reaxc->control->bond_cut * reaxc->control->bond_cut;
 
 		for( itr_j = 0; itr_j < numneigh[i]; ++itr_j ) {
 			j = jlist[itr_j];

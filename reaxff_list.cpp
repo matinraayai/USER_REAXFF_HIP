@@ -42,7 +42,7 @@ void Print_List_Indices( reax_list * const l )
 {
     int i;
 
-    assert( l != NULL );
+    assert( l != nullptr );
 
     for ( i = 0; i < l->n; i++ )
     {
@@ -67,7 +67,7 @@ void Make_List( int n, int max_intrs, int type, int format, reax_list * const l 
 {
     assert( n > 0 );
     assert( max_intrs > 0 );
-    assert( l != NULL );
+    assert( l != nullptr );
 
     if ( l->allocated == TRUE )
     {
@@ -135,7 +135,7 @@ void Make_List( int n, int max_intrs, int type, int format, reax_list * const l 
 
 void Delete_List( reax_list * const l )
 {
-    assert( l != NULL );
+    assert( l != nullptr );
 
     if ( l->allocated == FALSE )
     {
@@ -203,9 +203,9 @@ void Init_List_Indices( reax_list * const l, int * const max_intrs )
 {
     int i;
 
-    assert( l != NULL );
+    assert( l != nullptr );
     assert( l->n > 0 );
-    assert( max_intrs > 0 );
+    assert( max_intrs != nullptr );
 
     /* exclusive prefix sum of max_intrs replaces start indices,
      * set end indices to the same as start indices for safety */

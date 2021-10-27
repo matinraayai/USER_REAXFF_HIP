@@ -61,12 +61,13 @@
 #include "reaxff_hip_forces.h"
 #include "reaxff_hip_allocate.h"
 #include "reaxff_hip_copy.h"
+#include "reaxff_box.h"
 
 
 
 using namespace LAMMPS_NS;
 
-static const char cite_pair_reax_c[] =
+static const char cite_pair_reax_ff[] =
 		"pair reax/c command:\n\n"
 		"@Article{Aktulga12,\n"
 		" author = {H. M. Aktulga, J. C. Fogarty, S. A. Pandit, A. Y. Grama},\n"
@@ -79,9 +80,9 @@ static const char cite_pair_reax_c[] =
 
 /* ---------------------------------------------------------------------- */
 
-PairReaxCGPU::PairReaxCGPU(LAMMPS *lmp) : Pair(lmp)
+PairReaxFFHIP::PairReaxFFHIP(LAMMPS *lmp) : Pair(lmp)
 {
-	if (lmp->citeme) lmp->citeme->add(cite_pair_reax_c);
+	if (lmp->citeme) lmp->citeme->add(cite_pair_reax_ff);
 
 	single_enable = 0;
 	restartinfo = 0;
@@ -90,18 +91,14 @@ PairReaxCGPU::PairReaxCGPU(LAMMPS *lmp) : Pair(lmp)
 	ghostneigh = 1;
 
 	fix_id = new char[24];
-	snprintf(fix_id,24,"REAXC_%d",instance_me);
+	snprintf(fix_id,24,"REAXFF_%d",instance_me);
 
-	system = (reax_system *)
-    																																										memory->smalloc(sizeof(reax_system),"reax:system");
-	memset(system,0,sizeof(reax_system));
-	control = (control_params *)
-    																																										memory->smalloc(sizeof(control_params),"reax:control");
+	system = (reax_system *) memory->smalloc(sizeof(reax_system),"reax:system");
+	memset(system, 0, sizeof(reax_system));
+	control = (control_params *) memory->smalloc(sizeof(control_params),"reax:control");
 	memset(control,0,sizeof(control_params));
-	data = (simulation_data *)
-    																																										memory->smalloc(sizeof(simulation_data),"reax:data");
-	workspace = (storage *)
-    																																										memory->smalloc(sizeof(storage),"reax:storage");
+	data = (simulation_data *) memory->smalloc(sizeof(simulation_data),"reax:data");
+	workspace = (storage *) memory->smalloc(sizeof(storage),"reax:storage");
 
 	workspace->d_workspace = (storage *)memory->smalloc(sizeof(storage),"reax:gpu_storage");
 
@@ -111,8 +108,7 @@ PairReaxCGPU::PairReaxCGPU(LAMMPS *lmp) : Pair(lmp)
 	gpu_lists = (reax_list **)memory->smalloc(sizeof(reax_list*) * LIST_N ,"reax:gpu_lists");
 	for ( int i = 0; i < LIST_N; ++i )
 	{
-		gpu_lists[i] = (reax_list *)memory->smalloc( sizeof(reax_list),
-				"Setup::pmd_handle->lists[i]" );
+		gpu_lists[i] = (reax_list *)memory->smalloc( sizeof(reax_list), "Setup::pmd_handle->lists[i]" );
 		gpu_lists[i]->allocated = FALSE;
 	}
 
@@ -164,7 +160,7 @@ PairReaxCGPU::PairReaxCGPU(LAMMPS *lmp) : Pair(lmp)
 
 /* ---------------------------------------------------------------------- */
 
-PairReaxCGPU::~PairReaxCGPU()
+PairReaxFFHIP::~PairReaxFFHIP()
 {
 
 	if (copymode) return;
@@ -206,7 +202,7 @@ PairReaxCGPU::~PairReaxCGPU()
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::allocate( )
+void PairReaxFFHIP::allocate( )
 {
 	allocated = 1;
 	int n = atom->ntypes;
@@ -223,7 +219,7 @@ void PairReaxCGPU::allocate( )
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::settings(int narg, char **arg)
+void PairReaxFFHIP::settings(int narg, char **arg)
 {
 	if (narg < 1) error->all(FLERR,"Illegal pair_style command");
 
@@ -308,13 +304,14 @@ void PairReaxCGPU::settings(int narg, char **arg)
 
     Hip_Setup_Environment(system->my_rank,
 			control->nprocs, control->gpus_per_node );
+    Setup_Environment(system, control, mpi_data);
 
 
 }
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::coeff( int nargs, char **args )
+void PairReaxFFHIP::coeff(int nargs, char **args )
 {
 	if (!allocated) allocate();
 
@@ -387,7 +384,7 @@ void PairReaxCGPU::coeff( int nargs, char **args )
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::init_style( )
+void PairReaxFFHIP::init_style( )
 {
 	if (!atom->q_flag)
 		error->all(FLERR,"Pair style reax/c requires atom attribute q");
@@ -453,7 +450,7 @@ void PairReaxCGPU::init_style( )
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::setup( )
+void PairReaxFFHIP::setup( )
 {
 	int oldN;
 	int mincap = system->mincap;
@@ -540,7 +537,7 @@ void PairReaxCGPU::setup( )
 
 /* ---------------------------------------------------------------------- */
 
-double PairReaxCGPU::init_one(int i, int j)
+double PairReaxFFHIP::init_one(int i, int j)
 {
 	if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
 
@@ -550,7 +547,7 @@ double PairReaxCGPU::init_one(int i, int j)
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::compute(int eflag, int vflag)
+void PairReaxFFHIP::compute(int eflag, int vflag)
 {
 
 	double evdwl,ecoul;
@@ -683,7 +680,7 @@ void PairReaxCGPU::compute(int eflag, int vflag)
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::update_and_copy_reax_atoms_to_device()
+void PairReaxFFHIP::update_and_copy_reax_atoms_to_device()
 {
 	int *num_bonds = fix_reax->num_bonds;
 	int *num_hbonds = fix_reax->num_hbonds;
@@ -707,7 +704,7 @@ void PairReaxCGPU::update_and_copy_reax_atoms_to_device()
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::get_distance( rvec xj, rvec xi, double *d_sqr, rvec *dvec )
+void PairReaxFFHIP::get_distance(rvec xj, rvec xi, double *d_sqr, rvec *dvec )
 {
 	(*dvec)[0] = xj[0] - xi[0];
 	(*dvec)[1] = xj[1] - xi[1];
@@ -717,8 +714,8 @@ void PairReaxCGPU::get_distance( rvec xj, rvec xi, double *d_sqr, rvec *dvec )
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::set_far_nbr( far_neighbor_data *fdest, int dest_idx,
-		int j, double d, rvec dvec )
+void PairReaxFFHIP::set_far_nbr(far_neighbor_data *fdest, int dest_idx,
+                                int j, double d, rvec dvec )
 		{
     fdest->nbr[dest_idx] = j;
     fdest->d[dest_idx] = d;
@@ -732,7 +729,7 @@ void PairReaxCGPU::set_far_nbr( far_neighbor_data *fdest, int dest_idx,
 
 /* ---------------------------------------------------------------------- */
 
-int PairReaxCGPU::estimate_reax_lists()
+int PairReaxFFHIP::estimate_reax_lists()
 {
 	int itr_i, itr_j, i, j;
 	int num_nbrs, num_marked;
@@ -798,7 +795,7 @@ int PairReaxCGPU::estimate_reax_lists()
 
 /* ---------------------------------------------------------------------- */
 
-int PairReaxCGPU::update_and_write_reax_lists_to_device()
+int PairReaxFFHIP::update_and_write_reax_lists_to_device()
 {
 
 
@@ -889,7 +886,7 @@ int PairReaxCGPU::update_and_write_reax_lists_to_device()
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::read_reax_forces_from_device(int /*vflag*/)
+void PairReaxFFHIP::read_reax_forces_from_device(int /*vflag*/)
 {
 
 	Output_Sync_Forces(workspace,system->total_cap);
@@ -924,7 +921,7 @@ void PairReaxCGPU::read_reax_forces_from_device(int /*vflag*/)
 
 /* ---------------------------------------------------------------------- */
 
-void *PairReaxCGPU::extract(const char *str, int &dim)
+void *PairReaxFFHIP::extract(const char *str, int &dim)
 {
 	dim = 1;
 	if (strcmp(str,"chi") == 0 && chi) {
@@ -950,7 +947,7 @@ void *PairReaxCGPU::extract(const char *str, int &dim)
 
 /* ---------------------------------------------------------------------- */
 
-double PairReaxCGPU::memory_usage()
+double PairReaxFFHIP::memory_usage()
 {
 
 	double bytes = 0.0;
@@ -981,6 +978,6 @@ double PairReaxCGPU::memory_usage()
 
 /* ---------------------------------------------------------------------- */
 
-void PairReaxCGPU::FindBond()
+void PairReaxFFHIP::FindBond()
 {
 }

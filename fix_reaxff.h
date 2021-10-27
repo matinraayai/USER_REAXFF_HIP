@@ -37,7 +37,7 @@ namespace LAMMPS_NS {
 class FixReaxC : public Fix {
   friend class PairReaxC;
   friend class PairReaxCOMP;
-  friend class PairReaxCGPU;
+  friend class PairReaxFFHIP;
  public:
   FixReaxC(class LAMMPS *,int, char **);
   ~FixReaxC();

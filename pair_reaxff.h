@@ -14,7 +14,7 @@
 /* ----------------------------------------------------------------------
    Contributing author: Trinayan Baruah, Northeastern University(baruah.t@northeastern.edu)
                         Nicholas Curtis, AMD(nicholas.curtis@amd.com)
-			David Kaeli,     Northeastern University(kaeli@ece.neu.edu)
+			                  David Kaeli,     Northeastern University(kaeli@ece.neu.edu)
    Please cite the related publication:
    H. M. Aktulga, J. C. Fogarty, S. A. Pandit, A. Y. Grama,
    "Parallel Reactive Molecular Dynamics: Numerical Methods and
@@ -23,7 +23,7 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(reax/c/gpu,PairReaxCGPU)
+    PairStyle(reax/f/hip,PairReaxFFHIP)
 
 #endif
 
@@ -35,59 +35,75 @@ PairStyle(reax/c/gpu,PairReaxCGPU)
 
 namespace LAMMPS_NS {
 
-class PairReaxCGPU : public Pair {
- public:
-  PairReaxCGPU(class LAMMPS *);
-  ~PairReaxCGPU();
-  void compute(int, int);
-  void settings(int, char **);
-  void coeff(int, char **);
-  virtual void init_style();
-  double init_one(int, int);
-  void *extract(const char *, int &);
-  int fixbond_flag, fixspecies_flag;
-  int **tmpid;
-  double **tmpbo,**tmpr;
+class PairReaxFFHIP : public Pair {
+  public:
+    explicit PairReaxFFHIP(class LAMMPS *);
 
-  control_params *control;
-  reax_system *system;
-  output_controls *out_control;
-  simulation_data *data;
-  storage *workspace;
-  reax_list **gpu_lists;
-  reax_list *cpu_lists;
+    ~PairReaxFFHIP() override;
 
-  mpi_datatypes *mpi_data;
+    void compute(int, int) override;
 
-  bigint ngroup;
+    void settings(int, char **) override;
 
- protected:
-  char *fix_id;
-  double cutmax;
-  int nelements;                // # of unique elements
-  char **elements;              // names of unique elements
-  int *map;
-  class FixReaxC *fix_reax;
+    void coeff(int, char **) override;
 
-  double *chi,*eta,*gamma;
-  int qeqflag;
-  int setup_flag;
-  int firstwarn;
+    virtual void init_style() override;
 
-  void allocate();
-  void setup();
-  void create_compute();
-  void create_fix();
-  void update_and_copy_reax_atoms_to_device();
-  int update_and_write_reax_lists_to_device();
-  void get_distance(rvec, rvec, double *, rvec *);
-  void set_far_nbr(far_neighbor_data *, int, int, double, rvec);
-  int estimate_reax_lists();
-  void read_reax_forces_from_device(int);
+    double init_one(int, int) override;
 
-  int nmax;
-  void FindBond();
-  double memory_usage();
+    void *extract(const char *, int &) override;
+
+    int fixbond_flag, fixspecies_flag;
+
+    int **tmpid;
+
+    double **tmpbo, **tmpr;
+
+    control_params *control;
+
+    reax_system *system;
+
+    output_controls *out_control;
+
+    simulation_data *data;
+
+    storage *workspace;
+
+    reax_list **gpu_lists;
+
+    reax_list *cpu_lists;
+
+    mpi_datatypes *mpi_data;
+
+    bigint ngroup;
+
+    protected:
+      char *fix_id;
+      double cutmax;
+      int nelements;                // # of unique elements
+      char **elements;              // names of unique elements
+      int *map;
+      class FixReaxC *fix_reax;
+
+      double *chi,*eta,*gamma;
+      int qeqflag;
+      int setup_flag;
+      int firstwarn;
+
+      void allocate();
+      void setup();
+      void create_compute();
+      void create_fix();
+      void update_and_copy_reax_atoms_to_device();
+      int update_and_write_reax_lists_to_device();
+      void get_distance(rvec, rvec, double *, rvec *);
+      void set_far_nbr(far_neighbor_data *, int, int, double, rvec);
+      int estimate_reax_lists();
+      void read_reax_forces_from_device(int);
+
+      int nmax;
+      void FindBond();
+      double memory_usage();
 
 };
 

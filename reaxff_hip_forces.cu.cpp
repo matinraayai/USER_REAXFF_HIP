@@ -46,6 +46,7 @@
     #include "reaxff_index_utils.h"
     #include "reaxff_tool_box.h"
     #include "reaxff_vector.h"
+    #include "reaxff_hip_nonbonded.h"
 #endif
 
 #include <hipcub/hipcub.hpp>
@@ -2357,7 +2358,7 @@ static void Hip_Compute_Total_Force( reax_system *system, control_params *contro
     sHipMemcpy( f, workspace->d_workspace->f, sizeof(rvec) * system->N ,
             hipMemcpyDeviceToHost, __FILE__, __LINE__ );
 
-    Coll( system, mpi_data, f, RVEC_PTR_TYPE, mpi_data->mpi_rvec );
+//    Coll( system, mpi_data, f, RVEC_PTR_TYPE, mpi_data->mpi_rvec );
 
     sHipMemcpy( workspace->d_workspace->f, f, sizeof(rvec) * system->N,
             hipMemcpyHostToDevice, __FILE__, __LINE__ );
@@ -2366,153 +2367,174 @@ static void Hip_Compute_Total_Force( reax_system *system, control_params *contro
 }
 
 
-extern "C" int Hip_Compute_Forces( reax_system *system, control_params *control,
-        simulation_data *data, storage *workspace, reax_list **lists,
-        output_controls *out_control, mpi_datatypes *mpi_data )
-{
-    int charge_flag, ret;
-    static int init_forces_done = FALSE;
-#if defined(LOG_PERFORMANCE)
-    float time_elapsed;
-    hipEvent_t time_event[6];
-    
-    for ( int i = 0; i < 6; ++i )
-    {
-        hipEventCreate( &time_event[i] );
-    }
-#endif
+//
+//extern "C" int Hip_Compute_Forces( reax_system *system, control_params *control,
+//        simulation_data *data, storage *workspace, reax_list **lists,
+//        output_controls *out_control, mpi_datatypes *mpi_data )
+//{
+//    int charge_flag, ret;
+//    static int init_forces_done = FALSE;
+//#if defined(LOG_PERFORMANCE)
+//    float time_elapsed;
+//    hipEvent_t time_event[6];
+//
+//    for ( int i = 0; i < 6; ++i )
+//    {
+//        hipEventCreate( &time_event[i] );
+//    }
+//#endif
+//
+//    ret = SUCCESS;
+//
+//    if ( control->charge_freq > 0
+//            && (data->step - data->prev_steps) % control->charge_freq == 0 )
+//    {
+//        charge_flag = TRUE;
+//    }
+//    else
+//    {
+//        charge_flag = FALSE;
+//    }
+//
+//#if defined(LOG_PERFORMANCE)
+//    hipEventRecord( time_event[0] );
+//#endif
+//
+//    if ( init_forces_done == FALSE )
+//    {
+//        if ( charge_flag == TRUE )
+//        {
+//            ret = Hip_Init_Forces( system, control, data,
+//                    workspace, lists, out_control );
+//        }
+//        else
+//        {
+//            ret = Hip_Init_Forces_No_Charges( system, control, data,
+//                    workspace, lists, out_control );
+//        }
+//
+//        if ( ret == SUCCESS )
+//        {
+//            init_forces_done = TRUE;
+//        }
+//    }
+//
+//#if defined(LOG_PERFORMANCE)
+//    hipEventRecord( time_event[1] );
+//#endif
+//
+//    if ( ret == SUCCESS )
+//    {
+//        ret = Hip_Compute_Bonded_Forces( system, control, data,
+//                workspace, lists, out_control );
+//    }
+//
+//#if defined(LOG_PERFORMANCE)
+//    hipEventRecord( time_event[2] );
+//#endif
+//
+//    if ( ret == SUCCESS )
+//    {
+//        if ( charge_flag == TRUE )
+//        {
+//            Hip_Compute_Charges( system, control, data,
+//                    workspace, out_control, mpi_data );
+//        }
+//
+//#if defined(LOG_PERFORMANCE)
+//        hipEventRecord( time_event[3] );
+//#endif
+//
+//        Hip_Compute_NonBonded_Forces( system, control, data, workspace,
+//                lists, out_control );
+//
+//#if defined(LOG_PERFORMANCE)
+//        hipEventRecord( time_event[4] );
+//#endif
+//
+//        Hip_Compute_Total_Force( system, control, data, workspace, lists, mpi_data );
+//
+//#if defined(LOG_PERFORMANCE)
+//        hipEventRecord( time_event[5] );
+//#endif
+//
+//        init_forces_done = FALSE;
+//    }
+//
+//#if defined(LOG_PERFORMANCE)
+//    if ( hipEventQuery( time_event[0] ) != hipSuccess )
+//    {
+//        hipEventSynchronize( time_event[0] );
+//    }
+//
+//    return SUCCESS;
+//
+//    hipEventElapsedTime( &time_elapsed, time_event[0], time_event[1] );
+//    data->timing.init_forces += (real) (time_elapsed / 1000.0);
+//
+//    if ( hipEventQuery( time_event[2] ) != hipSuccess )
+//    {
+//        hipEventSynchronize( time_event[2] );
+//    }
+//
+//    hipEventElapsedTime( &time_elapsed, time_event[1], time_event[2] );
+//    data->timing.bonded += (real) (time_elapsed / 1000.0);
+//
+//    if ( ret == SUCCESS )
+//    {
+//        if ( hipEventQuery( time_event[3] ) != hipSuccess )
+//        {
+//            hipEventSynchronize( time_event[3] );
+//        }
+//
+//        hipEventElapsedTime( &time_elapsed, time_event[2], time_event[3] );
+//        data->timing.cm += (real) (time_elapsed / 1000.0);
+//
+//        if ( hipEventQuery( time_event[4] ) != hipSuccess )
+//        {
+//            hipEventSynchronize( time_event[4] );
+//        }
+//
+//        hipEventElapsedTime( &time_elapsed, time_event[3], time_event[4] );
+//        data->timing.nonb += (real) (time_elapsed / 1000.0);
+//
+//        if ( hipEventQuery( time_event[5] ) != hipSuccess )
+//        {
+//            hipEventSynchronize( time_event[5] );
+//        }
+//
+//        hipEventElapsedTime( &time_elapsed, time_event[4], time_event[5] );
+//        data->timing.bonded += (real) (time_elapsed / 1000.0);
+//    }
+//
+//    for ( int i = 0; i < 6; ++i )
+//    {
+//        hipEventDestroy( time_event[i] );
+//    }
+//#endif
+//
+//    return ret;
+//}
 
-    ret = SUCCESS;
+int Hip_Compute_Forces( reax_system *system, control_params *control,
+                         simulation_data *data, storage *workspace, reax_list **lists,
+                         output_controls *out_control, mpi_datatypes *mpi_data )
+                         {
 
-    if ( control->charge_freq > 0
-            && (data->step - data->prev_steps) % control->charge_freq == 0 )
-    {
-        charge_flag = TRUE;
-    }
-    else
-    {
-        charge_flag = FALSE;
-    }
 
-#if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[0] );
-#endif
+    //printf("Calling \n");
+    Hip_Init_Forces_No_Charges(system, control, data, workspace,lists, out_control);
+    //printf("Init forces\n");
 
-    if ( init_forces_done == FALSE )
-    {
-        if ( charge_flag == TRUE )
-        {
-            ret = Hip_Init_Forces( system, control, data,
-                    workspace, lists, out_control );
-        }
-        else
-        {
-            ret = Hip_Init_Forces_No_Charges( system, control, data,
-                    workspace, lists, out_control );
-        }
+    Hip_Compute_Bonded_Forces(system, control, data, workspace, lists, out_control);
 
-        if ( ret == SUCCESS )
-        {
-            init_forces_done = TRUE;
-        }
-    }
 
-#if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[1] );
-#endif
+    Hip_Compute_NonBonded_Forces(system, control, data, workspace, lists, out_control);
+    Hip_Compute_Total_Force( system, control, data, workspace, lists, mpi_data );
+    //printf("Completed forces\n");
 
-    if ( ret == SUCCESS )
-    {
-        ret = Hip_Compute_Bonded_Forces( system, control, data,
-                workspace, lists, out_control );
-    }
+    return SUCCESS;
 
-#if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[2] );
-#endif
+    //exit(0);
 
-    if ( ret == SUCCESS )
-    {
-        if ( charge_flag == TRUE )
-        {
-            Hip_Compute_Charges( system, control, data,
-                    workspace, out_control, mpi_data );
-        }
-
-#if defined(LOG_PERFORMANCE)
-        hipEventRecord( time_event[3] );
-#endif
-
-        Hip_Compute_NonBonded_Forces( system, control, data, workspace,
-                lists, out_control );
-
-#if defined(LOG_PERFORMANCE)
-        hipEventRecord( time_event[4] );
-#endif
-
-        Hip_Compute_Total_Force( system, control, data, workspace, lists, mpi_data );
-
-#if defined(LOG_PERFORMANCE)
-        hipEventRecord( time_event[5] );
-#endif
-
-        init_forces_done = FALSE;
-    }
-
-#if defined(LOG_PERFORMANCE)
-    if ( hipEventQuery( time_event[0] ) != hipSuccess ) 
-    {
-        hipEventSynchronize( time_event[0] );
-    }
-
-    if ( hipEventQuery( time_event[1] ) != hipSuccess ) 
-    {
-        hipEventSynchronize( time_event[1] );
-    }
-
-    hipEventElapsedTime( &time_elapsed, time_event[0], time_event[1] ); 
-    data->timing.init_forces += (real) (time_elapsed / 1000.0);
-
-    if ( hipEventQuery( time_event[2] ) != hipSuccess ) 
-    {
-        hipEventSynchronize( time_event[2] );
-    }
-
-    hipEventElapsedTime( &time_elapsed, time_event[1], time_event[2] ); 
-    data->timing.bonded += (real) (time_elapsed / 1000.0);
-
-    if ( ret == SUCCESS )
-    {
-        if ( hipEventQuery( time_event[3] ) != hipSuccess ) 
-        {
-            hipEventSynchronize( time_event[3] );
-        }
-
-        hipEventElapsedTime( &time_elapsed, time_event[2], time_event[3] ); 
-        data->timing.cm += (real) (time_elapsed / 1000.0);
-
-        if ( hipEventQuery( time_event[4] ) != hipSuccess ) 
-        {
-            hipEventSynchronize( time_event[4] );
-        }
-
-        hipEventElapsedTime( &time_elapsed, time_event[3], time_event[4] ); 
-        data->timing.nonb += (real) (time_elapsed / 1000.0);
-
-        if ( hipEventQuery( time_event[5] ) != hipSuccess ) 
-        {
-            hipEventSynchronize( time_event[5] );
-        }
-
-        hipEventElapsedTime( &time_elapsed, time_event[4], time_event[5] ); 
-        data->timing.bonded += (real) (time_elapsed / 1000.0);
-    }
-    
-    for ( int i = 0; i < 6; ++i )
-    {
-        hipEventDestroy( time_event[i] );
-    }
-#endif
-
-    return ret;
-}
+ }

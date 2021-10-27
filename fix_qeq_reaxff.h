@@ -52,7 +52,7 @@ namespace LAMMPS_NS {
 		virtual void init_storage();
 		void setup_pre_force(int);
 		virtual void pre_force(int);
-		virtual int updateReaxLists(class PairReaxCGPU *reaxc);
+		virtual int updateReaxLists(class PairReaxFFHIP *reaxc);
 		virtual void get_distance( rvec xj, rvec xi, double *d_sqr, rvec *dvec );
 		virtual void set_far_nbr( far_neighbor_data *fdest, int dest_idx, int j, double d, rvec dvec);
 
@@ -75,7 +75,7 @@ namespace LAMMPS_NS {
 		int pack_flag;
 		int nlevels_respa;
 		class NeighList *list;
-		class PairReaxCGPU *reaxc;
+		class PairReaxFFHIP *reaxc;
 
 		double swa, swb;      // lower/upper Taper cutoff radius
 		double Tap[8];        // Taper function

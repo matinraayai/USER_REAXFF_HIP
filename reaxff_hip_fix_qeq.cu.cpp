@@ -13,7 +13,7 @@
 #include "reaxff_vector.h"
 #include "reaxff_hip_fix_qeq.h"
 #include "reaxff_hip_forces.h"
-//#include "reaxff_hip_spar_lin_alg.h"
+#include "reaxff_hip_spar_lin_alg.h"
 
 extern "C"
 {
@@ -170,8 +170,8 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
 
             if ( far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut)
             {
-                if ( i == 500)
-                    printf("%d,%d,%f,%f\n", i, j, nbr_pj->d, control->nonb_cut);
+//                if ( i == 500)
+//                    printf("%d,%d,%f,%f\n", i, j, nbr_pj->d, control->nonb_cut);
                 j = far_nbr_list.far_nbr_list.nbr[pj];
                 atom_j = &my_atoms[j];
                 type_j = atom_j->type;
@@ -666,7 +666,8 @@ void  Hip_Update_Q_And_Backup_ST(int nn, fix_qeq_gpu *qeq_gpu, double u,reax_sys
 	blocks = nn / DEF_BLOCK_SIZE
 			+ (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 
-	hipLaunchKernelGGL(k_update_q_and_backup_st, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0,   qeq_gpu->q,qeq_gpu->s,qeq_gpu->t,qeq_gpu->d_fix_my_atoms,qeq_gpu->s_hist,qeq_gpu->t_hist,u, nn, system->d_my_atoms);
+	hipLaunchKernelGGL(k_update_q_and_backup_st, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0, qeq_gpu->q,
+                       qeq_gpu->s,qeq_gpu->t,qeq_gpu->d_fix_my_atoms,qeq_gpu->s_hist,qeq_gpu->t_hist,u, nn, system->d_my_atoms);
 	hipDeviceSynchronize();
 	hipCheckError();
 

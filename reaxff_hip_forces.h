@@ -31,10 +31,10 @@ int Hip_Init_Forces_No_Charges( reax_system *, control_params *, simulation_data
 
 int Hip_Compute_Bonded_Forces( reax_system *, control_params *, simulation_data *,
         storage *, reax_list **, output_controls * );
-
-void Hip_Compute_NonBonded_Forces( reax_system *, control_params *,
-        simulation_data *, storage *, reax_list **, output_controls *,
-        mpi_datatypes * );
+//
+//void Hip_Compute_NonBonded_Forces( reax_system *, control_params *,
+//        simulation_data *, storage *, reax_list **, output_controls *,
+//        mpi_datatypes * );
 
 #ifdef __cplusplus
 extern "C" {

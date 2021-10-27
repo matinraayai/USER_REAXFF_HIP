@@ -58,7 +58,7 @@ static inline void __hipCheckError( const char *file, const int line )
         fprintf( stderr, "    [INFO] HIP API error text: %s\n", hipGetErrorString( err ) );
 #if !defined(DEBUG)
         fprintf( stderr, "    [WARNING] HIP error info may not be precise due to async nature of HIP kernels!"
-               " Rebuild in debug mode to get more accurate accounts of errors (--enable-debug=yes with configure script).\n" );
+               " Rebuild in debug mode to get more accurate accounts of errors (--enable-debug=yes with configure script if in PuReMD, -DDEBUG in LAMMPS).\n" );
 #endif
         exit( RUNTIME_ERROR );
     }

@@ -1,5 +1,5 @@
-#ifndef __CUDA_ALLOCATE_H_
-#define __CUDA_ALLOCATE_H_
+#ifndef __HIP_ALLOCATE_H_
+#define __HIP_ALLOCATE_H_
 
 #if defined(LAMMPS_REAX)
     #include "reaxff_types.h"

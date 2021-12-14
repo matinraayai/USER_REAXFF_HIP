@@ -240,7 +240,8 @@ static void int_packer( void const * const dummy, mpi_out_data * const out_buf,
 }
 
 
-static void real_packer( void const * const dummy, mpi_out_data * const out_buf )
+static void real_packer( void const * const dummy, mpi_out_data * const out_buf,
+       hipStream_t s )
 {
     int blocks;
 

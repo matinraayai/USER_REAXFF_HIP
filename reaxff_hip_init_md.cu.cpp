@@ -279,7 +279,7 @@ extern "C" void Hip_Initialize( reax_system *system, control_params *control,
 
     Init_MPI_Datatypes( system, workspace, mpi_data );
 
-#if defined(HIP_DEVICE_PACK)
+#if defined(HIP_DEVICE_PACK) & defined(__HIP_PLATFORM_NVCC__)
     if ( MPIX_Query_cuda_support( ) != 1 )
     {
         fprintf( stderr, "[ERROR] HIP device-side MPI buffer packing/unpacking enabled "

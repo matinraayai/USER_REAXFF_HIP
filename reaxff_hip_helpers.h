@@ -1,10 +1,10 @@
-#ifndef __CUDA_HELPERS__
-#define __CUDA_HELPERS__
+#ifndef __HIP_HELPERS__
+#define __HIP_HELPERS__
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
 
 
@@ -38,25 +38,25 @@ HIP_DEVICE static inline int Hip_strncmp( const char * a,
 }
 
 
-//#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600
-//HIP_DEVICE static inline double atomicAdd( double* address, double val )
-//{
-//    unsigned long long int *address_as_ull, old, assumed;
-//
-//    address_as_ull = (unsigned long long int*)address;
-//    old = *address_as_ull;
-//
-//    do
-//    {
-//        assumed = old;
-//        old = atomicCAS( address_as_ull, assumed,
-//                __double_as_longlong(val + __longlong_as_double(assumed)) );
-//    }
-//    while ( assumed != old );
-//
-//    return __longlong_as_double( old );
-//}
-//#endif
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600
+HIP_DEVICE static inline double atomicAdd( double* address, double val )
+{
+    unsigned long long int *address_as_ull, old, assumed;
+
+    address_as_ull = (unsigned long long int*)address;
+    old = *address_as_ull;
+
+    do
+    {
+        assumed = old;
+        old = atomicCAS( address_as_ull, assumed,
+                __double_as_longlong(val + __longlong_as_double(assumed)) );
+    }
+    while ( assumed != old );
+
+    return __longlong_as_double( old );
+}
+#endif
 
 
 HIP_DEVICE static inline void atomic_rvecAdd( rvec ret, rvec v )

@@ -1,12 +1,19 @@
+
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_reduction.h"
+
+    #include "reaxff_hip_utils.h"
+
+    #include "reaxff_vector.h"
+#else
+    #include "hip_reduction.h"
+
+    #include "hip_utils.h"
+
+    #include "../vector.h"
+#endif
+
 #include "hip/hip_runtime.h"
-
-#include "reaxff_hip_reduction.h"
-
-#include "reaxff_hip_utils.h"
-
-#include "reaxff_vector.h"
-
-
 #include <hipcub/hipcub.hpp>
 
 
@@ -27,27 +34,25 @@
  *
  * d_array: device array to reduce
  * d_dest: device pointer to hold result of reduction */
-void Hip_Reduction_Sum( int *d_array, int *d_dest, size_t n )
+void Hip_Reduction_Sum( int *d_array, int *d_dest, size_t n, int s_index, hipStream_t s )
 {
-    void *d_temp_storage = NULL;
-    size_t temp_storage_bytes = 0;
+    static void *d_temp_storage[MAX_HIP_STREAMS] = { NULL };
+    static size_t temp_storage_bytes[MAX_HIP_STREAMS] = { 0 };
+    void *temp = NULL;
+    size_t temp_bytes = 0;
 
     /* determine temporary device storage requirements */
-    hipcub::DeviceReduce::Sum( d_temp_storage, temp_storage_bytes,
-            d_array, d_dest, n );
+    hipcub::DeviceReduce::Sum( temp, temp_bytes, d_array, d_dest, n, s );
     hipCheckError( );
 
     /* allocate temporary storage */
-    hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-            "Hip_Reduction_Sum::d_temp_storage" );
+    sHipCheckMalloc( &d_temp_storage[s_index], &temp_storage_bytes[s_index],
+            temp_bytes, __FILE__, __LINE__ );
 
     /* run sum-reduction */
-    hipcub::DeviceReduce::Sum( d_temp_storage, temp_storage_bytes,
-            d_array, d_dest, n );
+    hipcub::DeviceReduce::Sum( d_temp_storage[s_index], temp_storage_bytes[s_index],
+            d_array, d_dest, n, s );
     hipCheckError( );
-
-    /* deallocate temporary storage */
-    hip_free( d_temp_storage, "Hip_Reduction_Sum::d_temp_storage" );
 }
 
 
@@ -55,27 +60,25 @@ void Hip_Reduction_Sum( int *d_array, int *d_dest, size_t n )
  *
  * d_array: device array to reduce
  * d_dest: device pointer to hold result of reduction */
-void Hip_Reduction_Sum( real *d_array, real *d_dest, size_t n )
+void Hip_Reduction_Sum( real *d_array, real *d_dest, size_t n, int s_index, hipStream_t s )
 {
-    void *d_temp_storage = NULL;
-    size_t temp_storage_bytes = 0;
+    static void *d_temp_storage[MAX_HIP_STREAMS] = { NULL };
+    static size_t temp_storage_bytes[MAX_HIP_STREAMS] = { 0 };
+    void *temp = NULL;
+    size_t temp_bytes = 0;
 
     /* determine temporary device storage requirements */
-    hipcub::DeviceReduce::Sum( d_temp_storage, temp_storage_bytes,
-            d_array, d_dest, n );
+    hipcub::DeviceReduce::Sum( temp, temp_bytes, d_array, d_dest, n, s );
     hipCheckError( );
 
     /* allocate temporary storage */
-    hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-            "Hip_Reduction_Sum::d_temp_storage" );
+    sHipCheckMalloc( &d_temp_storage[s_index], &temp_storage_bytes[s_index],
+            temp_bytes, __FILE__, __LINE__ );
 
     /* run sum-reduction */
-    hipcub::DeviceReduce::Sum( d_temp_storage, temp_storage_bytes,
-            d_array, d_dest, n );
+    hipcub::DeviceReduce::Sum( d_temp_storage[s_index], temp_storage_bytes[s_index],
+            d_array, d_dest, n, s );
     hipCheckError( );
-
-    /* deallocate temporary storage */
-    hip_free( d_temp_storage, "Hip_Reduction_Sum::d_temp_storage" );
 }
 
 
@@ -83,7 +86,7 @@ void Hip_Reduction_Sum( real *d_array, real *d_dest, size_t n )
 // *
 // * d_array: device array to reduce
 // * d_dest: device pointer to hold result of reduction */
-//void Hip_Reduction_Sum( rvec *d_array, rvec *d_dest, size_t n )
+//void Hip_Reduction_Sum( rvec *d_array, rvec *d_dest, size_t n, hipStream_t s )
 //{
 //    void *d_temp_storage = NULL;
 //    size_t temp_storage_bytes = 0;
@@ -91,77 +94,46 @@ void Hip_Reduction_Sum( real *d_array, real *d_dest, size_t n )
 //    rvec init = {0.0, 0.0, 0.0};
 //
 //    /* determine temporary device storage requirements */
-//    hipcub::DeviceReduce::Reduce( d_temp_storage, temp_storage_bytes,
-//            d_array, d_dest, n, sum_op, init );
+//    cub::DeviceReduce::Reduce( d_temp_storage, temp_storage_bytes,
+//            d_array, d_dest, n, sum_op, init, s );
 //    hipCheckError( );
 //
 //    /* allocate temporary storage */
-//    hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-//            "hipcub::reduce::temp_storage" );
+//    sHipMalloc( &d_temp_storage, temp_storage_bytes, __FILE__, __LINE__ );
 //
 //    /* run sum-reduction */
-//    hipcub::DeviceReduce::Reduce( d_temp_storage, temp_storage_bytes,
-//            d_array, d_dest, n, sum_op, init );
+//    cub::DeviceReduce::Reduce( d_temp_storage, temp_storage_bytes,
+//            d_array, d_dest, n, sum_op, init, s );
 //    hipCheckError( );
 //
 //    /* deallocate temporary storage */
-//    hip_free( d_temp_storage, "hipcub::reduce::temp_storage" );
+//    sHipFree( d_temp_storage, __FILE__, __LINE__ );
 //}
-
-
-/* Perform a device-wide reduction (max operation)
- *
- * d_array: device array to reduce
- * d_dest: device pointer to hold result of reduction */
-void Hip_Reduction_Max( int *d_array, int *d_dest, size_t n )
-{
-    void *d_temp_storage = NULL;
-    size_t temp_storage_bytes = 0;
-
-    /* determine temporary device storage requirements */
-    hipcub::DeviceReduce::Max( d_temp_storage, temp_storage_bytes,
-            d_array, d_dest, n );
-    hipCheckError( );
-
-    /* allocate temporary storage */
-    hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-            "Hip_Reduction_Max::temp_storage" );
-
-    /* run exclusive prefix sum */
-    hipcub::DeviceReduce::Max( d_temp_storage, temp_storage_bytes,
-            d_array, d_dest, n );
-    hipCheckError( );
-
-    /* deallocate temporary storage */
-    hip_free( d_temp_storage, "Hip_Reduction_Max::temp_storage" );
-}
 
 
 /* Perform a device-wide scan (partial sum operation)
  *
  * d_src: device array to scan
  * d_dest: device array to hold result of scan */
-void Hip_Scan_Excl_Sum( int *d_src, int *d_dest, size_t n )
+void Hip_Scan_Excl_Sum( int *d_src, int *d_dest, size_t n, int s_index, hipStream_t s )
 {
-    void *d_temp_storage = NULL;
-    size_t temp_storage_bytes = 0;
+    static void *d_temp_storage[MAX_HIP_STREAMS] = { NULL };
+    static size_t temp_storage_bytes[MAX_HIP_STREAMS] = { 0 };
+    void *temp = NULL;
+    size_t temp_bytes = 0;
 
     /* determine temporary device storage requirements */
-    hipcub::DeviceScan::ExclusiveSum( d_temp_storage, temp_storage_bytes,
-            d_src, d_dest, n );
+    hipcub::DeviceScan::ExclusiveSum( temp, temp_bytes, d_src, d_dest, n, s );
     hipCheckError( );
 
     /* allocate temporary storage */
-    hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-            "Hip_Scan_Excl_Sum::temp_storage" );
+    sHipCheckMalloc( &d_temp_storage[s_index], &temp_storage_bytes[s_index],
+            temp_bytes, __FILE__, __LINE__ );
 
     /* run exclusive prefix sum */
-    hipcub::DeviceScan::ExclusiveSum( d_temp_storage, temp_storage_bytes,
-            d_src, d_dest, n );
+    hipcub::DeviceScan::ExclusiveSum( d_temp_storage[s_index], temp_storage_bytes[s_index],
+            d_src, d_dest, n, s );
     hipCheckError( );
-
-    /* deallocate temporary storage */
-    hip_free( d_temp_storage, "Hip_Scan_Excl_Sum::temp_storage" );
 }
 
 
@@ -173,7 +145,7 @@ void Hip_Scan_Excl_Sum( int *d_src, int *d_dest, size_t n )
  */
 HIP_GLOBAL void k_reduction_rvec( rvec *input, rvec *results, size_t n )
 {
-    HIP_DYNAMIC_SHARED( rvec, data_s)
+    extern __shared__ rvec data_s[];
     rvec data;
     unsigned int i;
     int offset;
@@ -187,8 +159,6 @@ HIP_GLOBAL void k_reduction_rvec( rvec *input, rvec *results, size_t n )
         data[1] = 0.f;
         data[2] = 0.f;
     }
-
-    rvec_Copy( data, input[i] );
 
     /* warp-level sum using registers within a warp */
     for ( offset = warpSize >> 1; offset > 0; offset >>= 1 )
@@ -227,54 +197,38 @@ HIP_GLOBAL void k_reduction_rvec( rvec *input, rvec *results, size_t n )
 
 HIP_GLOBAL void k_reduction_rvec2( rvec2 *input, rvec2 *results, size_t n )
 {
-    HIP_DYNAMIC_SHARED( rvec2, data_rvec2_s)
-    rvec2 data;
+    extern __shared__ hipcub::BlockReduce<double, DEF_BLOCK_SIZE>::TempStorage temp_block[];
     unsigned int i;
-    int offset;
+    rvec2 data;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) {
+
+    if ( i < n )
+    {
         data[0] = input[i][0];
         data[1] = input[i][1];
     }
-    else {
-        data[0] = 0.f;
-        data[1] = 0.f;
+    else
+    {
+        data[0] = 0.0;
+        data[1] = 0.0;
     }
 
-        /* warp-level sum using registers within a warp */
-    for ( offset = warpSize >> 1; offset > 0; offset >>= 1 )
-    {
-        data[0] += __shfl_down(data[0], offset);
-        data[1] += __shfl_down(data[1], offset);
-    }
-
-    /* first thread within a warp writes warp-level sum to shared memory */
-    if ( threadIdx.x % warpSize == 0 )
-    {
-        data_rvec2_s[threadIdx.x / warpSize][0] = data[0];
-        data_rvec2_s[threadIdx.x / warpSize][1] = data[1];
-    }
+    data[0] = hipcub::BlockReduce<double, DEF_BLOCK_SIZE>(*temp_block).Sum(data[0]);
     __syncthreads( );
-
-    /* block-level sum using shared memory */
-    for ( offset = blockDim.x / (warpSize << 1); offset > 0; offset >>= 1 )
-    {
-        if ( threadIdx.x < offset )
-        {
-            data_rvec2_s[threadIdx.x][0] += data_rvec2_s[threadIdx.x + offset][0];
-            data_rvec2_s[threadIdx.x][1] += data_rvec2_s[threadIdx.x + offset][1];
-        }
-
-        __syncthreads( );
-    }
+    data[1] = hipcub::BlockReduce<double, DEF_BLOCK_SIZE>(*temp_block).Sum(data[1]);
 
     /* one thread writes the block-level partial sum
      * of the reduction back to global memory */
     if ( threadIdx.x == 0 )
     {
-        results[blockIdx.x][0] = data_rvec2_s[0][0];
-        results[blockIdx.x][1] = data_rvec2_s[0][1];
+#if !defined(HIP_ACCUM_ATOMIC)
+        results[blockIdx.x][0] = data[0];
+        results[blockIdx.x][1] = data[1];
+#else
+        atomicAdd( (double *) &results[0][0], (double) data[0] );
+        atomicAdd( (double *) &results[0][1], (double) data[1] );
+#endif
     }
 
 }

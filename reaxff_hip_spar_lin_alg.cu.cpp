@@ -1,4 +1,3 @@
-#include "hip/hip_runtime.h"
 /*----------------------------------------------------------------------
   PuReMD - Purdue ReaxFF Molecular Dynamics Program
 
@@ -19,26 +18,47 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
+#include "hip/hip_runtime.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_spar_lin_alg.h"
 
-#include "reaxff_hip_spar_lin_alg.h"
+    #if defined(HIP_DEVICE_PACK)
+      #include "reaxff_hip_basic_comm.h"
+    #endif
+    #include "reaxff_hip_dense_lin_alg.h"
+    #include "reaxff_hip_helpers.h"
+    #include "reaxff_hip_utils.h"
+    #include "reaxff_hip_reduction.h"
 
-#if defined(CUDA_DEVICE_PACK)
-  #include "cuda_basic_comm.h"
+    #if !defined(HIP_DEVICE_PACK)
+      #include "reaxff_basic_comm.h"
+    #endif
+    #include "reaxff_comm_tools.h"
+    #include "reaxff_tool_box.h"
+#else
+    #include "hip_spar_lin_alg.h"
+
+    #if defined(HIP_DEVICE_PACK)
+      #include "hip_basic_comm.h"
+    #endif
+    #include "hip_dense_lin_alg.h"
+    #include "hip_helpers.h"
+    #include "hip_utils.h"
+    #include "hip_reduction.h"
+
+    #if !defined(HIP_DEVICE_PACK)
+      #include "../basic_comm.h"
+    #endif
+    #include "../comm_tools.h"
+    #include "../tool_box.h"
 #endif
-#include "reaxff_hip_dense_lin_alg.h"
-#include "reaxff_hip_helpers.h"
-#include "reaxff_hip_utils.h"
-#include "reaxff_hip_reduction.h"
-
-#if !defined(CUDA_DEVICE_PACK)
-  #include "reaxff_basic_comm.h"
-#endif
-#include "reaxff_comm_tools.h"
-#include "reaxff_tool_box.h"
 
 
-/* mask used to determine which threads within a warp participate in operations */
-#define FULL_MASK (0xFFFFFFFF)
+enum preconditioner_type
+{
+    LEFT = 0,
+    RIGHT = 1,
+};
 
 
 /* Jacobi preconditioner computation */
@@ -239,7 +259,6 @@ HIP_GLOBAL void k_sparse_matvec_half_opt_csr( int *row_ptr_start,
     for ( offset = warpSize >> 1; offset > 0; offset >>= 1 )
     {
         sum += __shfl_down(sum, offset );
-        __syncthreads();
     }
 
     /* local contribution to row i for this warp */
@@ -337,7 +356,6 @@ HIP_GLOBAL void k_sparse_matvec_full_opt_csr( int *row_ptr_start,
     for ( offset = warpSize >> 1; offset > 0; offset >>= 1 )
     {
         sum += __shfl_down(sum, offset );
-        __syncthreads();
     }
 
     __syncthreads( );
@@ -549,27 +567,29 @@ HIP_GLOBAL void k_dual_sparse_matvec_full_opt_csr( int *row_ptr_start,
 
 
 void dual_jacobi_apply( real const * const Hdia_inv, rvec2 const * const y,
-        rvec2 * const x, int n )
+        rvec2 * const x, int n, hipStream_t s )
 {
     int blocks;
 
     blocks = (n / DEF_BLOCK_SIZE)
         + ((n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_dual_jacobi_apply, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  Hdia_inv, y, x, n );
+    k_dual_jacobi_apply <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( Hdia_inv, y, x, n );
     hipCheckError( );
 }
 
 
 void jacobi_apply( real const * const Hdia_inv, real const * const y,
-        real * const x, int n )
+        real * const x, int n, hipStream_t s )
 {
     int blocks;
 
     blocks = (n / DEF_BLOCK_SIZE)
         + ((n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_jacobi_apply, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  Hdia_inv, y, x, n );
+    k_jacobi_apply <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( Hdia_inv, y, x, n );
     hipCheckError( );
 }
 
@@ -591,25 +611,26 @@ static void Dual_Sparse_MatVec_Comm_Part1( const reax_system * const system,
         mpi_datatypes * const mpi_data, void const * const x, int n,
         int buf_type, MPI_Datatype mpi_type )
 {
+#if !defined(HIP_DEVICE_PACK)
     rvec2 *spad;
 
-#if defined(CUDA_DEVICE_PACK)
-    /* exploit 3D domain decomposition of simulation space with 3-stage communication pattern */
-    Hip_Dist( system, mpi_data, x, buf_type, mpi_type );
-#else
-    check_smalloc( &workspace->host_scratch, &workspace->host_scratch_size,
-            sizeof(rvec2) * n, TRUE, SAFE_ZONE,
-            "Dual_Sparse_MatVec_Comm_Part1::workspace->host_scratch" );
+    smalloc_check( &workspace->host_scratch, &workspace->host_scratch_size,
+            sizeof(rvec2) * n, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
     spad = (rvec2 *) workspace->host_scratch;
 
-    sHipMemcpy( spad, (void *) x, sizeof(rvec2) * n,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( spad, (void *) x, sizeof(rvec2) * n,
+            hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+
+    hipStreamSynchronize( control->streams[4] );
 
     /* exploit 3D domain decomposition of simulation space with 3-stage communication pattern */
     Dist( system, mpi_data, spad, buf_type, mpi_type );
 
-    sHipMemcpy( (void *) x, spad, sizeof(rvec2) * n,
-            hipMemcpyHostToDevice, __FILE__, __LINE__ );
+    sHipMemcpyAsync( (void *) x, spad, sizeof(rvec2) * n,
+            hipMemcpyHostToDevice, control->streams[4], __FILE__, __LINE__ );
+#else
+    /* exploit 3D domain decomposition of simulation space with 3-stage communication pattern */
+    Hip_Dist( system, workspace, mpi_data, x, buf_type, mpi_type, control->streams[4] );
 #endif
 }
 
@@ -624,17 +645,17 @@ static void Dual_Sparse_MatVec_Comm_Part1( const reax_system * const system,
  */
 static void Dual_Sparse_MatVec_local( control_params const * const control,
         sparse_matrix const * const A, rvec2 const * const x,
-        rvec2 * const b, int n )
+        rvec2 * const b, int n, hipStream_t s )
 {
     int blocks;
 
     if ( A->format == SYM_HALF_MATRIX )
     {
         /* half-format requires entries of b be initialized to zero */
-        hip_memset( b, 0, sizeof(rvec2) * n, "Dual_Sparse_MatVec_local::b" );
+        sHipMemsetAsync( b, 0, sizeof(rvec2) * n, s, __FILE__, __LINE__ );
 
         /* 1 thread per row implementation */
-//        k_dual_sparse_matvec_half_csr <<< control->blocks, control->block_size >>>
+//        k_dual_sparse_matvec_half_csr <<< control->blocks, control->block_size, 0, s >>>
 //            ( A->start, A->end, A->j, A->val, x, b, A->n );
 
         blocks = A->n * warpSize / DEF_BLOCK_SIZE
@@ -642,41 +663,22 @@ static void Dual_Sparse_MatVec_local( control_params const * const control,
         
         /* 32 threads per row implementation
          * using registers to accumulate partial row sums */
-        hipLaunchKernelGGL(k_dual_sparse_matvec_half_opt_csr, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0,  A->start, A->end, A->j, A->val, x, b, A->n );
+        k_dual_sparse_matvec_half_opt_csr <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+             ( A->start, A->end, A->j, A->val, x, b, A->n );
     }
     else if ( A->format == SYM_FULL_MATRIX )
     {
         /* 1 thread per row implementation */
-   //k_dual_sparse_matvec_full_csr <<< control->blocks_n, control->blocks_size_n >>>
-     //        ( *A, x, b, A->n );
+//        k_dual_sparse_matvec_full_csr <<< control->blocks_n, control->blocks_size_n, 0, s >>>
+//             ( *A, x, b, A->n );
 
         blocks = ((A->n * warpSize) / DEF_BLOCK_SIZE)
             + (((A->n * warpSize) % DEF_BLOCK_SIZE) == 0 ? 0 : 1);
         
-        /* using registers to accumulate partial row sums */
-
-
-
-	hipLaunchKernelGGL(k_dual_sparse_matvec_full_opt_csr, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  A->start, A->end, A->j, A->val, x, b, A->n );
-        hipDeviceSynchronize();
-
-
-
-
-    /*	rvec2 *temp1,*temp2;
-	temp1 = (rvec2*)malloc(n*sizeof(rvec2));
-	temp2 = (rvec2*)malloc(n*sizeof(rvec2));
-        sHipMemcpy( temp1, b, sizeof(rvec2) * n,
-                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
-	sHipMemcpy( temp2, x, sizeof(rvec2) * n,
-                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
-
-*/
-
-
-
-
-        
+        /* 32 threads per row implementation
+         * using registers to accumulate partial row sums */
+        k_dual_sparse_matvec_full_opt_csr <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+                ( A->start, A->end, A->j, A->val, x, b, A->n );
     }
     hipCheckError( );
 }
@@ -704,25 +706,29 @@ static void Dual_Sparse_MatVec_Comm_Part2( const reax_system * const system,
         mpi_datatypes * const mpi_data, int mat_format,
         void * const b, int n1, int n2, int buf_type, MPI_Datatype mpi_type )
 {
+#if !defined(HIP_DEVICE_PACK)
     rvec2 *spad;
+#endif
 
     /* reduction required for symmetric half matrix */
     if ( mat_format == SYM_HALF_MATRIX )
     {
-#if defined(CUDA_DEVICE_PACK)
-        Hip_Coll( system, mpi_data, b, buf_type, mpi_type );
-#else
-        check_smalloc( &workspace->host_scratch, &workspace->host_scratch_size,
-                sizeof(rvec2) * n1, TRUE, SAFE_ZONE,
-                "Dual_Sparse_MatVec_Comm_Part2::workspace->host_scratch" );
+#if !defined(HIP_DEVICE_PACK)
+        smalloc_check( &workspace->host_scratch, &workspace->host_scratch_size,
+                sizeof(rvec2) * n1, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
         spad = (rvec2 *) workspace->host_scratch;
-        sHipMemcpy( spad, b, sizeof(rvec2) * n1,
-                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+
+        sHipMemcpyAsync( spad, b, sizeof(rvec2) * n1,
+                hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+
+        hipStreamSynchronize( control->streams[4] );
 
         Coll( system, mpi_data, spad, buf_type, mpi_type );
 
-        sHipMemcpy( b, spad, sizeof(rvec2) * n2,
-                hipMemcpyHostToDevice, __FILE__, __LINE__ );
+        sHipMemcpyAsync( b, spad, sizeof(rvec2) * n2,
+                hipMemcpyHostToDevice, control->streams[4], __FILE__, __LINE__ );
+#else
+        Hip_Coll( system, mpi_data, b, buf_type, mpi_type, control->streams[4] );
 #endif
     }
 }
@@ -742,7 +748,7 @@ static void Dual_Sparse_MatVec_Comm_Part2( const reax_system * const system,
 static void Dual_Sparse_MatVec( const reax_system * const system,
         control_params const * const control, simulation_data * const data,
         storage * const workspace, mpi_datatypes * const mpi_data,
-        sparse_matrix const * const A, rvec2 * const x,
+        sparse_matrix const * const A, rvec2 const * const x,
         int n, rvec2 * const b )
 {
 #if defined(LOG_PERFORMANCE)
@@ -758,7 +764,7 @@ static void Dual_Sparse_MatVec( const reax_system * const system,
     Update_Timing_Info( &time, &data->timing.cm_solver_comm );
 #endif
 
-    Dual_Sparse_MatVec_local( control, A, x, b, n );
+    Dual_Sparse_MatVec_local( control, A, x, b, n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_spmv );
@@ -788,24 +794,26 @@ static void Sparse_MatVec_Comm_Part1( const reax_system * const system,
         mpi_datatypes * const mpi_data, void const * const x, int n,
         int buf_type, MPI_Datatype mpi_type )
 {
+#if !defined(HIP_DEVICE_PACK)
     real *spad;
 
-#if defined(CUDA_DEVICE_PACK)
-    /* exploit 3D domain decomposition of simulation space with 3-stage communication pattern */
-    Hip_Dist( system, mpi_data, x, buf_type, mpi_type );
-#else
-    check_smalloc( &workspace->host_scratch, &workspace->host_scratch_size,
-            sizeof(real) * n, TRUE, SAFE_ZONE,
-            "Sparse_MatVec_Comm_Part1::workspace->host_scratch" );
+    smalloc_check( &workspace->host_scratch, &workspace->host_scratch_size,
+            sizeof(real) * n, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
     spad = (real *) workspace->host_scratch;
-    sHipMemcpy( spad, (void *) x, sizeof(real) * n,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+
+    sHipMemcpyAsync( spad, (void *) x, sizeof(real) * n,
+            hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+
+    hipStreamSynchronize( control->streams[4] );
 
     /* exploit 3D domain decomposition of simulation space with 3-stage communication pattern */
     Dist( system, mpi_data, spad, buf_type, mpi_type );
 
-    sHipMemcpy( (void *) x, spad, sizeof(real) * n,
-            hipMemcpyHostToDevice, __FILE__, __LINE__ );
+    sHipMemcpyAsync( (void *) x, spad, sizeof(real) * n,
+            hipMemcpyHostToDevice, control->streams[4], __FILE__, __LINE__ );
+#else
+    /* exploit 3D domain decomposition of simulation space with 3-stage communication pattern */
+    Hip_Dist( system, workspace, mpi_data, x, buf_type, mpi_type, control->streams[4] );
 #endif
 }
 
@@ -818,19 +826,19 @@ static void Sparse_MatVec_Comm_Part1( const reax_system * const system,
  * b (output): dense vector
  * n: number of entries in b
  */
-void Sparse_MatVec_local( control_params const * const control,
+static void Sparse_MatVec_local( control_params const * const control,
         sparse_matrix const * const A, real const * const x,
-        real * const b, int n )
+        real * const b, int n, hipStream_t s )
 {
     int blocks;
 
     if ( A->format == SYM_HALF_MATRIX )
     {
         /* half-format requires entries of b be initialized to zero */
-        hip_memset( b, 0, sizeof(real) * n, "Sparse_MatVec_local::b" );
+        sHipMemsetAsync( b, 0, sizeof(real) * n, s, __FILE__, __LINE__ );
 
         /* 1 thread per row implementation */
-//        k_sparse_matvec_half_csr <<< control->blocks, control->block_size >>>
+//        k_sparse_matvec_half_csr <<< control->blocks, control->block_size, 0, s >>>
 //            ( A->start, A->end, A->j, A->val, x, b, A->n );
 
         blocks = (A->n * warpSize / DEF_BLOCK_SIZE)
@@ -838,12 +846,13 @@ void Sparse_MatVec_local( control_params const * const control,
 
         /* 32 threads per row implementation
          * using registers to accumulate partial row sums */
-        hipLaunchKernelGGL(k_sparse_matvec_half_opt_csr, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  A->start, A->end, A->j, A->val, x, b, A->n );
+        k_sparse_matvec_half_opt_csr <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+             ( A->start, A->end, A->j, A->val, x, b, A->n );
     }
     else if ( A->format == SYM_FULL_MATRIX )
     {
         /* 1 thread per row implementation */
-//        k_sparse_matvec_full_csr <<< control->blocks, control->blocks_size >>>
+//        k_sparse_matvec_full_csr <<< control->blocks, control->blocks_size, 0, s >>>
 //             ( A->start, A->end, A->j, A->val, x, b, A->n );
 
         blocks = ((A->n * warpSize) / DEF_BLOCK_SIZE)
@@ -851,7 +860,8 @@ void Sparse_MatVec_local( control_params const * const control,
 
         /*
          * using registers to accumulate partial row sums */
-        hipLaunchKernelGGL(k_sparse_matvec_full_opt_csr, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  A->start, A->end, A->j, A->val, x, b, A->n );
+        k_sparse_matvec_full_opt_csr <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+             ( A->start, A->end, A->j, A->val, x, b, A->n );
     }
     hipCheckError( );
 }
@@ -877,25 +887,29 @@ static void Sparse_MatVec_Comm_Part2( const reax_system * const system,
         mpi_datatypes * const mpi_data, int mat_format,
         void * const b, int n1, int n2, int buf_type, MPI_Datatype mpi_type )
 {
+#if !defined(HIP_DEVICE_PACK)
     real *spad;
+#endif
 
     /* reduction required for symmetric half matrix */
     if ( mat_format == SYM_HALF_MATRIX )
     {
-#if defined(CUDA_DEVICE_PACK)
-        Hip_Coll( system, mpi_data, b, buf_type, mpi_type );
-#else
-        check_smalloc( &workspace->host_scratch, &workspace->host_scratch_size,
-                sizeof(real) * n1, TRUE, SAFE_ZONE,
-                "Sparse_MatVec_Comm_Part2::workspace->host_scratch" );
+#if !defined(HIP_DEVICE_PACK)
+        smalloc_check( &workspace->host_scratch, &workspace->host_scratch_size,
+                sizeof(real) * n1, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
         spad = (real *) workspace->host_scratch;
-        sHipMemcpy( spad, b, sizeof(real) * n1,
-                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+
+        sHipMemcpyAsync( spad, b, sizeof(real) * n1,
+                hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+
+        hipStreamSynchronize( control->streams[4] );
 
         Coll( system, mpi_data, spad, buf_type, mpi_type );
 
-        sHipMemcpy( b, spad, sizeof(real) * n2,
-                hipMemcpyHostToDevice, __FILE__, __LINE__ );
+        sHipMemcpyAsync( b, spad, sizeof(real) * n2,
+                hipMemcpyHostToDevice, control->streams[4], __FILE__, __LINE__ );
+#else
+        Hip_Coll( system, mpi_data, b, buf_type, mpi_type, control->streams[4] );
 #endif
     }
 }
@@ -931,7 +945,7 @@ static void Sparse_MatVec( reax_system const * const system,
     Update_Timing_Info( &time, &data->timing.cm_solver_comm );
 #endif
 
-    Sparse_MatVec_local( control, A, x, b, n );
+    Sparse_MatVec_local( control, A, x, b, n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_spmv );
@@ -946,11 +960,549 @@ static void Sparse_MatVec( reax_system const * const system,
 }
 
 
+/* Apply left-sided preconditioning while solving M^{-1}AX = M^{-1}B
+ *
+ * system:
+ * workspace: data struct containing matrices and vectors, stored in CSR
+ * control: data struct containing parameters
+ * data: struct containing timing simulation data (including performance data)
+ * y: vector to which to apply preconditioning,
+ *  specific to internals of iterative solver being used
+ * x (output): preconditioned vector
+ * fresh_pre: parameter indicating if this is a newly computed (fresh) preconditioner
+ * side: used in determining how to apply preconditioner if the preconditioner is
+ *  factorized as M = M_{1}M_{2} (e.g., incomplete LU, A \approx LU)
+ *
+ * Assumptions:
+ *   Matrices have non-zero diagonals
+ *   Each row of a matrix has at least one non-zero (i.e., no rows with all zeros) */
+static void dual_apply_preconditioner( reax_system const * const system,
+        storage * const workspace, control_params const * const control,
+        simulation_data * const data, mpi_datatypes * const  mpi_data,
+        rvec2 const * const y, rvec2 * const x, int fresh_pre, int side )
+{
+//    int i, si;
+
+    /* no preconditioning */
+    if ( control->cm_solver_pre_comp_type == NONE_PC )
+    {
+        if ( x != y )
+        {
+            Vector_Copy_rvec2( x, y, system->n, control->streams[4] );
+        }
+    }
+    else
+    {
+        switch ( side )
+        {
+            case LEFT:
+                switch ( control->cm_solver_pre_app_type )
+                {
+                    case TRI_SOLVE_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                                dual_jacobi_apply( workspace->d_workspace->Hdia_inv,
+                                        y, x, system->n, control->streams[4] );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve( workspace->L, y, x, workspace->L->n, LOWER );
+//                                  break;
+                            case SAI_PC:
+#if defined(NEUTRAL_TERRITORY)
+                                Dual_Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, H->NT, x );
+#else
+                                Dual_Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, system->n, x );
+#endif
+                                break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_LEVEL_SCHED_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                                dual_jacobi_apply( workspace->d_workspace->Hdia_inv,
+                                        y, x, system->n, control->streams[4] );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                          workspace->L, y, x, workspace->L->n, LOWER, fresh_pre );
+//                                  break;
+                            case SAI_PC:
+#if defined(NEUTRAL_TERRITORY)
+                                Dual_Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, H->NT, x );
+#else
+                                Dual_Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, system->n, x );
+#endif
+                                break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_GC_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  for ( i = 0; i < workspace->H->n; ++i )
+//                                  {
+//                                      workspace->y_p[i] = y[i];
+//                                  }
+//
+//                                  permute_vector( workspace, workspace->y_p, workspace->H->n, FALSE, LOWER );
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                  workspace->L, workspace->y_p, x, workspace->L->n, LOWER, fresh_pre );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case JACOBI_ITER_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                // construct D^{-1}_L
+//                                if ( fresh_pre == TRUE )
+//                                {
+//                                    for ( i = 0; i < workspace->L->n; ++i )
+//                                    {
+//                                        si = workspace->L->start[i + 1] - 1;
+//                                        workspace->Dinv_L[i] = 1.0 / workspace->L->val[si];
+//                                    }
+//                                }
+//
+//                                jacobi_iter( workspace, workspace->L, workspace->Dinv_L,
+//                                        y, x, LOWER, control->cm_solver_pre_app_jacobi_iters );
+//                                break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    default:
+                        fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                        exit( INVALID_INPUT );
+                        break;
+
+                }
+                break;
+
+            case RIGHT:
+                switch ( control->cm_solver_pre_app_type )
+                {
+                    case TRI_SOLVE_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                if ( x != y )
+                                {
+                                    Vector_Copy_rvec2( x, y, system->n, control->streams[4] );
+                                }
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve( workspace->U, y, x, workspace->U->n, UPPER );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_LEVEL_SCHED_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                if ( x != y )
+                                {
+                                    Vector_Copy_rvec2( x, y, system->n, control->streams[4] );
+                                }
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                          workspace->U, y, x, workspace->U->n, UPPER, fresh_pre );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_GC_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                  workspace->U, y, x, workspace->U->n, UPPER, fresh_pre );
+//                                  permute_vector( workspace, x, workspace->H->n, TRUE, UPPER );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case JACOBI_ITER_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  if ( fresh_pre == TRUE )
+//                                  {
+//                                      for ( i = 0; i < workspace->U->n; ++i )
+//                                      {
+//                                          si = workspace->U->start[i];
+//                                          workspace->Dinv_U[i] = 1.0 / workspace->U->val[si];
+//                                      }
+//                                  }
+//
+//                                  jacobi_iter( workspace, workspace->U, workspace->Dinv_U,
+//                                          y, x, UPPER, control->cm_solver_pre_app_jacobi_iters );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    default:
+                        fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                        exit( INVALID_INPUT );
+                        break;
+
+                }
+                break;
+        }
+    }
+}
+
+
+/* Apply left-sided preconditioning while solving M^{-1}Ax = M^{-1}b
+ *
+ * system:
+ * workspace: data struct containing matrices and vectors, stored in CSR
+ * control: data struct containing parameters
+ * data: struct containing timing simulation data (including performance data)
+ * y: vector to which to apply preconditioning,
+ *  specific to internals of iterative solver being used
+ * x (output): preconditioned vector
+ * fresh_pre: parameter indicating if this is a newly computed (fresh) preconditioner
+ * side: used in determining how to apply preconditioner if the preconditioner is
+ *  factorized as M = M_{1}M_{2} (e.g., incomplete LU, A \approx LU)
+ *
+ * Assumptions:
+ *   Matrices have non-zero diagonals
+ *   Each row of a matrix has at least one non-zero (i.e., no rows with all zeros) */
+static void apply_preconditioner( reax_system const * const system,
+        storage * const workspace, control_params const * const control,
+        simulation_data * const data, mpi_datatypes * const  mpi_data,
+        real const * const y, real * const x, int fresh_pre, int side )
+{
+//    int i, si;
+
+    /* no preconditioning */
+    if ( control->cm_solver_pre_comp_type == NONE_PC )
+    {
+        if ( x != y )
+        {
+            Vector_Copy( x, y, system->n, control->streams[4] );
+        }
+    }
+    else
+    {
+        switch ( side )
+        {
+            case LEFT:
+                switch ( control->cm_solver_pre_app_type )
+                {
+                    case TRI_SOLVE_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                                jacobi_apply( workspace->d_workspace->Hdia_inv,
+                                        y, x, system->n, control->streams[4] );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve( workspace->L, y, x, workspace->L->n, LOWER );
+//                                  break;
+                            case SAI_PC:
+#if defined(NEUTRAL_TERRITORY)
+                                Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, H->NT, x );
+#else
+                                Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, system->n, x );
+#endif
+                                break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_LEVEL_SCHED_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                                jacobi_apply( workspace->d_workspace->Hdia_inv,
+                                        y, x, system->n, control->streams[4] );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                          workspace->L, y, x, workspace->L->n, LOWER, fresh_pre );
+//                                  break;
+                            case SAI_PC:
+#if defined(NEUTRAL_TERRITORY)
+                                Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, H->NT, x );
+#else
+                                Sparse_MatVec( system, control, data, workspace, mpi_data,
+                                        &workspace->d_workspace->H_app_inv,
+                                        y, system->n, x );
+#endif
+                                break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_GC_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  for ( i = 0; i < workspace->H->n; ++i )
+//                                  {
+//                                      workspace->y_p[i] = y[i];
+//                                  }
+//
+//                                  permute_vector( workspace, workspace->y_p, workspace->H->n, FALSE, LOWER );
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                  workspace->L, workspace->y_p, x, workspace->L->n, LOWER, fresh_pre );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case JACOBI_ITER_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                // construct D^{-1}_L
+//                                if ( fresh_pre == TRUE )
+//                                {
+//                                    for ( i = 0; i < workspace->L->n; ++i )
+//                                    {
+//                                        si = workspace->L->start[i + 1] - 1;
+//                                        workspace->Dinv_L[i] = 1.0 / workspace->L->val[si];
+//                                    }
+//                                }
+//
+//                                jacobi_iter( workspace, workspace->L, workspace->Dinv_L,
+//                                        y, x, LOWER, control->cm_solver_pre_app_jacobi_iters );
+//                                break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    default:
+                        fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                        exit( INVALID_INPUT );
+                        break;
+
+                }
+                break;
+
+            case RIGHT:
+                switch ( control->cm_solver_pre_app_type )
+                {
+                    case TRI_SOLVE_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                if ( x != y )
+                                {
+                                    Vector_Copy( x, y, system->n, control->streams[4] );
+                                }
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve( workspace->U, y, x, workspace->U->n, UPPER );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_LEVEL_SCHED_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                if ( x != y )
+                                {
+                                    Vector_Copy( x, y, system->n, control->streams[4] );
+                                }
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                          workspace->U, y, x, workspace->U->n, UPPER, fresh_pre );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case TRI_SOLVE_GC_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  tri_solve_level_sched( (static_storage *) workspace,
+//                                  workspace->U, y, x, workspace->U->n, UPPER, fresh_pre );
+//                                  permute_vector( workspace, x, workspace->H->n, TRUE, UPPER );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    case JACOBI_ITER_PA:
+                        switch ( control->cm_solver_pre_comp_type )
+                        {
+                            case JACOBI_PC:
+                            case SAI_PC:
+                                fprintf( stderr, "Unsupported preconditioner computation/application method combination. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+//                            case ICHOLT_PC:
+//                            case ILUT_PC:
+//                            case ILUTP_PC:
+//                                  if ( fresh_pre == TRUE )
+//                                  {
+//                                      for ( i = 0; i < workspace->U->n; ++i )
+//                                      {
+//                                          si = workspace->U->start[i];
+//                                          workspace->Dinv_U[i] = 1.0 / workspace->U->val[si];
+//                                      }
+//                                  }
+//
+//                                  jacobi_iter( workspace, workspace->U, workspace->Dinv_U,
+//                                          y, x, UPPER, control->cm_solver_pre_app_jacobi_iters );
+//                                  break;
+                            default:
+                                fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                                exit( INVALID_INPUT );
+                                break;
+                        }
+                        break;
+                    default:
+                        fprintf( stderr, "Unrecognized preconditioner application method. Terminating...\n" );
+                        exit( INVALID_INPUT );
+                        break;
+
+                }
+                break;
+        }
+    }
+}
+
+
 int Hip_dual_SDM( reax_system const * const system,
         control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, rvec2 const * const b, real tol,
-        rvec2 * const x, mpi_datatypes * const mpi_data )
+        rvec2 * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i, matvecs;
     int ret;
@@ -968,22 +1520,25 @@ int Hip_dual_SDM( reax_system const * const system,
 #endif
 
     Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, b,
-            -1.0, -1.0, workspace->d_workspace->q2, system->n );
+            -1.0, -1.0, workspace->d_workspace->q2, system->n,
+	   control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r2,
-            workspace->d_workspace->d2, system->n );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r2, workspace->d_workspace->q2, fresh_pre, LEFT );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->q2, workspace->d_workspace->d2, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-    Dot_local_rvec2( control, workspace, b, b, system->n, &redux[0], &redux[1] );
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-            workspace->d_workspace->d2, system->n, &redux[2], &redux[3] );
+    Dot_local_rvec2( workspace, b, b, system->n, &redux[0], &redux[1], control->streams[4] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+            workspace->d_workspace->d2, system->n, &redux[2], &redux[3], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1015,10 +1570,10 @@ int Hip_dual_SDM( reax_system const * const system,
         time = Get_Time( );
 #endif
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-                workspace->d_workspace->d2, system->n, &redux[0], &redux[1] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->d2,
-                workspace->d_workspace->q2, system->n, &redux[2], &redux[3] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+                workspace->d_workspace->d2, system->n, &redux[0], &redux[1], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->d2,
+                workspace->d_workspace->q2, system->n, &redux[2], &redux[3], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_allreduce );
@@ -1038,16 +1593,18 @@ int Hip_dual_SDM( reax_system const * const system,
         tmp[1] = redux[3];
         alpha[0] = sig[0] / tmp[0];
         alpha[1] = sig[1] / tmp[1];
-        Vector_Add_rvec2( x, alpha[0], alpha[1], workspace->d_workspace->d2, system->n );
+        Vector_Add_rvec2( x, alpha[0], alpha[1], workspace->d_workspace->d2, system->n, control->streams[4] );
         Vector_Add_rvec2( workspace->d_workspace->r2, -1.0 * alpha[0], -1.0 * alpha[1],
-                workspace->d_workspace->q2, system->n );
+                workspace->d_workspace->q2, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r2,
-                workspace->d_workspace->d2, system->n );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->r2, workspace->d_workspace->q2, FALSE, LEFT );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->q2, workspace->d_workspace->d2, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -1058,27 +1615,27 @@ int Hip_dual_SDM( reax_system const * const system,
             && SQRT(sig[1]) / b_norm[1] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->t,
-                workspace->d_workspace->x, 1, system->n );
+                workspace->d_workspace->x, 1, system->n, control->streams[4] );
 
         matvecs = Hip_SDM( system, control, data, workspace, H,
                 workspace->d_workspace->b_t, tol,
-                workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->t, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->t, 1, system->n );
+                workspace->d_workspace->t, 1, system->n, control->streams[4] );
     }
     else if ( SQRT(sig[1]) / b_norm[1] <= tol
             && SQRT(sig[0]) / b_norm[0] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->s,
-                workspace->d_workspace->x, 0, system->n );
+                workspace->d_workspace->x, 0, system->n, control->streams[4] );
 
         matvecs = Hip_SDM( system, control, data, workspace, H,
                 workspace->d_workspace->b_s, tol,
-                workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->s, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->s, 0, system->n );
+                workspace->d_workspace->s, 0, system->n, control->streams[4] );
     }
     else
     {
@@ -1101,7 +1658,7 @@ int Hip_dual_SDM( reax_system const * const system,
 int Hip_SDM( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, real const * const b, real tol,
-        real * const x, mpi_datatypes * const mpi_data )
+        real * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i;
     int ret;
@@ -1119,22 +1676,24 @@ int Hip_SDM( reax_system const * const system, control_params const * const cont
 #endif
 
     Vector_Sum( workspace->d_workspace->r, 1.0, b,
-            -1.0, workspace->d_workspace->q, system->n );
+            -1.0, workspace->d_workspace->q, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r,
-            workspace->d_workspace->d, system->n );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r, workspace->d_workspace->q, fresh_pre, LEFT );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->q, workspace->d_workspace->d, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-    redux[0] = Dot_local( workspace, b, b, system->n );
+    redux[0] = Dot_local( workspace, b, b, system->n, control->streams[4] );
     redux[1] = Dot_local( workspace, workspace->d_workspace->r,
-            workspace->d_workspace->d, system->n );
+            workspace->d_workspace->d, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1160,9 +1719,9 @@ int Hip_SDM( reax_system const * const system, control_params const * const cont
 #endif
 
         redux[0] = Dot_local( workspace, workspace->d_workspace->r,
-                workspace->d_workspace->d, system->n );
+                workspace->d_workspace->d, system->n, control->streams[4] );
         redux[1] = Dot_local( workspace, workspace->d_workspace->d,
-                workspace->d_workspace->q, system->n );
+                workspace->d_workspace->q, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_allreduce );
@@ -1179,16 +1738,18 @@ int Hip_SDM( reax_system const * const system, control_params const * const cont
         sig = redux[0];
         tmp = redux[1];
         alpha = sig / tmp;
-        Vector_Add( x, alpha, workspace->d_workspace->d, system->n );
+        Vector_Add( x, alpha, workspace->d_workspace->d, system->n, control->streams[4] );
         Vector_Add( workspace->d_workspace->r, -1.0 * alpha,
-                workspace->d_workspace->q, system->n );
+                workspace->d_workspace->q, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r,
-                workspace->d_workspace->d, system->n );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->r, workspace->d_workspace->q, FALSE, LEFT );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->q, workspace->d_workspace->d, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -1212,7 +1773,7 @@ int Hip_dual_CG( reax_system const * const system,
         control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, rvec2 const * const b, real tol,
-        rvec2 * const x, mpi_datatypes * const mpi_data )
+        rvec2 * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i, matvecs;
     int ret;
@@ -1230,24 +1791,26 @@ int Hip_dual_CG( reax_system const * const system,
 #endif
 
     Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, b,
-            -1.0, -1.0, workspace->d_workspace->q2, system->n );
+            -1.0, -1.0, workspace->d_workspace->q2, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r2,
-            workspace->d_workspace->d2, system->n );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r2, workspace->d_workspace->q2, fresh_pre, LEFT );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->q2, workspace->d_workspace->d2, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-            workspace->d_workspace->d2, system->n, &redux[0], &redux[1] );
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->d2,
-            workspace->d_workspace->d2, system->n, &redux[2], &redux[3] );
-    Dot_local_rvec2( control, workspace, b, b, system->n, &redux[4], &redux[5] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+            workspace->d_workspace->d2, system->n, &redux[0], &redux[1], control->streams[4] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->d2,
+            workspace->d_workspace->d2, system->n, &redux[2], &redux[3], control->streams[4] );
+    Dot_local_rvec2( workspace, b, b, system->n, &redux[4], &redux[5], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1266,7 +1829,6 @@ int Hip_dual_CG( reax_system const * const system,
     Update_Timing_Info( &time, &data->timing.cm_solver_allreduce );
 #endif
 
-
     for ( i = 0; i < control->cm_solver_max_iters; ++i )
     {
         if ( r_norm[0] / b_norm[0] <= tol || r_norm[1] / b_norm[1] <= tol )
@@ -1281,8 +1843,8 @@ int Hip_dual_CG( reax_system const * const system,
         time = Get_Time( );
 #endif
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->d2,
-                workspace->d_workspace->q2, system->n, &redux[0], &redux[1] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->d2,
+                workspace->d_workspace->q2, system->n, &redux[0], &redux[1], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1299,28 +1861,28 @@ int Hip_dual_CG( reax_system const * const system,
 
         alpha[0] = sig_new[0] / tmp[0];
         alpha[1] = sig_new[1] / tmp[1];
-
-
         Vector_Add_rvec2( x, alpha[0], alpha[1],
-                workspace->d_workspace->d2, system->n );
+                workspace->d_workspace->d2, system->n, control->streams[4] );
         Vector_Add_rvec2( workspace->d_workspace->r2, -1.0 * alpha[0], -1.0 * alpha[1],
-                workspace->d_workspace->q2, system->n );
+                workspace->d_workspace->q2, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r2,
-                workspace->d_workspace->p2, system->n );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->r2, workspace->d_workspace->q2, FALSE, LEFT );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->q2, workspace->d_workspace->p2, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-                workspace->d_workspace->p2, system->n, &redux[0], &redux[1] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->p2,
-                workspace->d_workspace->p2, system->n, &redux[2], &redux[3] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+                workspace->d_workspace->p2, system->n, &redux[0], &redux[1], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->p2,
+                workspace->d_workspace->p2, system->n, &redux[2], &redux[3], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1341,12 +1903,10 @@ int Hip_dual_CG( reax_system const * const system,
         r_norm[1] = SQRT( redux[3] );
         beta[0] = sig_new[0] / sig_old[0];
         beta[1] = sig_new[1] / sig_old[1];
-        printf("Updates %f,%f,%f,%f\n", sig_old[0], sig_old[1], sig_new[0], sig_new[1]);
-
         /* d = p + beta * d */
         Vector_Sum_rvec2( workspace->d_workspace->d2,
                 1.0, 1.0, workspace->d_workspace->p2,
-                beta[0], beta[1], workspace->d_workspace->d2, system->n );
+                beta[0], beta[1], workspace->d_workspace->d2, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1357,27 +1917,27 @@ int Hip_dual_CG( reax_system const * const system,
             && r_norm[1] / b_norm[1] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->t,
-                workspace->d_workspace->x, 1, system->n );
+                workspace->d_workspace->x, 1, system->n, control->streams[4] );
 
         matvecs = Hip_CG( system, control, data, workspace, H,
                 workspace->d_workspace->b_t, tol,
-                workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->t, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->t, 1, system->n );
+                workspace->d_workspace->t, 1, system->n, control->streams[4] );
     }
     else if ( r_norm[1] / b_norm[1] <= tol
             && r_norm[0] / b_norm[0] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->s,
-                workspace->d_workspace->x, 0, system->n );
+                workspace->d_workspace->x, 0, system->n, control->streams[4] );
 
         matvecs = Hip_CG( system, control, data, workspace, H,
                 workspace->d_workspace->b_s, tol,
-                workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->s, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->s, 0, system->n );
+                workspace->d_workspace->s, 0, system->n, control->streams[4] );
     }
     else
     {
@@ -1400,7 +1960,7 @@ int Hip_dual_CG( reax_system const * const system,
 int Hip_CG( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, real const * const b, real tol,
-        real * const x, mpi_datatypes * const mpi_data )
+        real * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i;
     int ret;
@@ -1419,24 +1979,26 @@ int Hip_CG( reax_system const * const system, control_params const * const contr
 #endif
 
     Vector_Sum( workspace->d_workspace->r, 1.0, b,
-            -1.0, workspace->d_workspace->q, system->n );
+            -1.0, workspace->d_workspace->q, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r,
-            workspace->d_workspace->d, system->n );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r, workspace->d_workspace->q, fresh_pre, LEFT );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->q, workspace->d_workspace->d, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
     redux[0] = Dot_local( workspace, workspace->d_workspace->r,
-            workspace->d_workspace->d, system->n );
+            workspace->d_workspace->d, system->n, control->streams[4] );
     redux[1] = Dot_local( workspace, workspace->d_workspace->d,
-            workspace->d_workspace->d, system->n );
-    redux[2] = Dot_local( workspace, b, b, system->n );
+            workspace->d_workspace->d, system->n, control->streams[4] );
+    redux[2] = Dot_local( workspace, b, b, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1463,32 +2025,34 @@ int Hip_CG( reax_system const * const system, control_params const * const contr
 #endif
 
         tmp = Dot( workspace, workspace->d_workspace->d, workspace->d_workspace->q,
-                system->n, MPI_COMM_WORLD );
+                system->n, MPI_COMM_WORLD, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_allreduce );
 #endif
 
         alpha = sig_new / tmp;
-        Vector_Add( x, alpha, workspace->d_workspace->d, system->n );
+        Vector_Add( x, alpha, workspace->d_workspace->d, system->n, control->streams[4] );
         Vector_Add( workspace->d_workspace->r, -1.0 * alpha,
-                workspace->d_workspace->q, system->n );
+                workspace->d_workspace->q, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r,
-                workspace->d_workspace->p, system->n );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->r, workspace->d_workspace->q, FALSE, LEFT );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->q, workspace->d_workspace->p, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
         redux[0] = Dot_local( workspace, workspace->d_workspace->r,
-                workspace->d_workspace->p, system->n );
+                workspace->d_workspace->p, system->n, control->streams[4] );
         redux[1] = Dot_local( workspace, workspace->d_workspace->p,
-                workspace->d_workspace->p, system->n );
+                workspace->d_workspace->p, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1507,7 +2071,7 @@ int Hip_CG( reax_system const * const system, control_params const * const contr
         r_norm = SQRT( redux[1] );
         beta = sig_new / sig_old;
         Vector_Sum( workspace->d_workspace->d, 1.0, workspace->d_workspace->p,
-                beta, workspace->d_workspace->d, system->n );
+                beta, workspace->d_workspace->d, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1545,7 +2109,7 @@ int Hip_CG( reax_system const * const system, control_params const * const contr
 int Hip_dual_BiCGStab( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, rvec2 const * const b, real tol,
-        rvec2 * const x, mpi_datatypes * const mpi_data )
+        rvec2 * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i, matvecs;
     int ret;
@@ -1563,11 +2127,11 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
 #endif
 
     Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, b,
-            -1.0, -1.0, workspace->d_workspace->d2, system->n );
-    Dot_local_rvec2( control, workspace, b,
-            b, system->n, &redux[0], &redux[1] );
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-            workspace->d_workspace->r2, system->n, &redux[2], &redux[3] );
+            -1.0, -1.0, workspace->d_workspace->d2, system->n, control->streams[4] );
+    Dot_local_rvec2( workspace, b,
+            b, system->n, &redux[0], &redux[1], control->streams[4] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+            workspace->d_workspace->r2, system->n, &redux[2], &redux[3], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1594,7 +2158,7 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         b_norm[1] = 1.0;
     }
     Vector_Copy_rvec2( workspace->d_workspace->r_hat2,
-            workspace->d_workspace->r2, system->n );
+            workspace->d_workspace->r2, system->n, control->streams[4] );
     omega[0] = 1.0;
     omega[1] = 1.0;
     rho[0] = 1.0;
@@ -1611,8 +2175,8 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
             break;
         }
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->r_hat2,
-                workspace->d_workspace->r2, system->n, &redux[0], &redux[1] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->r_hat2,
+                workspace->d_workspace->r2, system->n, &redux[0], &redux[1], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1638,23 +2202,27 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
             beta[1] = (rho[1] / rho_old[1]) * (alpha[1] / omega[1]);
             Vector_Sum_rvec2( workspace->d_workspace->q2,
                     1.0, 1.0, workspace->d_workspace->p2,
-                    -1.0 * omega[0], -1.0 * omega[1], workspace->d_workspace->z2, system->n );
+                    -1.0 * omega[0], -1.0 * omega[1], workspace->d_workspace->z2, system->n, control->streams[4] );
             Vector_Sum_rvec2( workspace->d_workspace->p2,
                     1.0, 1.0, workspace->d_workspace->r2,
-                    beta[0], beta[1], workspace->d_workspace->q2, system->n );
+                    beta[0], beta[1], workspace->d_workspace->q2, system->n, control->streams[4] );
         }
         else
         {
             Vector_Copy_rvec2( workspace->d_workspace->p2,
-                    workspace->d_workspace->r2, system->n );
+                    workspace->d_workspace->r2, system->n, control->streams[4] );
         }
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->p2,
-                workspace->d_workspace->d2, system->n );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->p2, workspace->d_workspace->y2,
+                i == 0 ? fresh_pre : FALSE, LEFT );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->y2, workspace->d_workspace->d2,
+                i == 0 ? fresh_pre : FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -1667,8 +2235,8 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         time = Get_Time( );
 #endif
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->r_hat2,
-                workspace->d_workspace->z2, system->n, &redux[0], &redux[1] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->r_hat2,
+                workspace->d_workspace->z2, system->n, &redux[0], &redux[1], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1688,9 +2256,9 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         alpha[1] = rho[1] / tmp[1];
         Vector_Sum_rvec2( workspace->d_workspace->q2,
                 1.0, 1.0, workspace->d_workspace->r2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->z2, system->n );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->q2,
-                workspace->d_workspace->q2, system->n, &redux[0], &redux[1] );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->z2, system->n, control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->q2,
+                workspace->d_workspace->q2, system->n, &redux[0], &redux[1], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1709,7 +2277,7 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         /* early convergence check */
         if ( tmp[0] < tol || tmp[1] < tol )
         {
-            Vector_Add_rvec2( x, alpha[0], alpha[1], workspace->d_workspace->d2, system->n );
+            Vector_Add_rvec2( x, alpha[0], alpha[1], workspace->d_workspace->d2, system->n, control->streams[4] );
             break;
         }
 
@@ -1717,8 +2285,10 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->q2,
-                workspace->d_workspace->q_hat2, system->n );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->q2, workspace->d_workspace->y2, fresh_pre, LEFT );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->y2, workspace->d_workspace->q_hat2, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -1731,10 +2301,10 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         time = Get_Time( );
 #endif
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->y2,
-                workspace->d_workspace->q2, system->n, &redux[0], &redux[1] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->y2,
-                workspace->d_workspace->y2, system->n, &redux[2], &redux[3] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->y2,
+                workspace->d_workspace->q2, system->n, &redux[0], &redux[1], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->y2,
+                workspace->d_workspace->y2, system->n, &redux[2], &redux[3], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1756,13 +2326,13 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
         omega[1] = sigma[1] / tmp[1];
         Vector_Sum_rvec2( workspace->d_workspace->g2,
                 alpha[0], alpha[1], workspace->d_workspace->d2,
-                omega[0], omega[1], workspace->d_workspace->q_hat2, system->n );
-        Vector_Add_rvec2( x, 1.0, 1.0, workspace->d_workspace->g2, system->n );
+                omega[0], omega[1], workspace->d_workspace->q_hat2, system->n, control->streams[4] );
+        Vector_Add_rvec2( x, 1.0, 1.0, workspace->d_workspace->g2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->r2,
                 1.0, 1.0, workspace->d_workspace->q2,
-                -1.0 * omega[0], -1.0 * omega[1], workspace->d_workspace->y2, system->n );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-                workspace->d_workspace->r2, system->n, &redux[0], &redux[1] );
+                -1.0 * omega[0], -1.0 * omega[1], workspace->d_workspace->y2, system->n, control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+                workspace->d_workspace->r2, system->n, &redux[0], &redux[1], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1794,27 +2364,27 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
             && r_norm[1] / b_norm[1] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->t,
-                workspace->d_workspace->x, 1, system->n );
+                workspace->d_workspace->x, 1, system->n, control->streams[4] );
 
         matvecs = Hip_BiCGStab( system, control, data, workspace, H,
                 workspace->d_workspace->b_t, tol,
-                workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->t, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->t, 1, system->n );
+                workspace->d_workspace->t, 1, system->n, control->streams[4] );
     }
     else if ( r_norm[1] / b_norm[1] <= tol
             && r_norm[0] / b_norm[0] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->s,
-                workspace->d_workspace->x, 0, system->n );
+                workspace->d_workspace->x, 0, system->n, control->streams[4] );
 
         matvecs = Hip_BiCGStab( system, control, data, workspace, H,
                 workspace->d_workspace->b_s, tol,
-                workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->s, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->s, 0, system->n );
+                workspace->d_workspace->s, 0, system->n, control->streams[4] );
     }
     else
     {
@@ -1852,7 +2422,7 @@ int Hip_dual_BiCGStab( reax_system const * const system, control_params const * 
 int Hip_BiCGStab( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, real const * const b, real tol,
-        real * const x, mpi_datatypes * const mpi_data )
+        real * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i;
     int ret;
@@ -1870,10 +2440,10 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
 #endif
 
     Vector_Sum( workspace->d_workspace->r, 1.0, b,
-            -1.0, workspace->d_workspace->d, system->n );
-    redux[0] = Dot_local( workspace, b, b, system->n );
+            -1.0, workspace->d_workspace->d, system->n, control->streams[4] );
+    redux[0] = Dot_local( workspace, b, b, system->n, control->streams[4] );
     redux[1] = Dot_local( workspace, workspace->d_workspace->r,
-            workspace->d_workspace->r, system->n );
+            workspace->d_workspace->r, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1894,7 +2464,7 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
         b_norm = 1.0;
     }
     Vector_Copy( workspace->d_workspace->r_hat,
-            workspace->d_workspace->r, system->n );
+            workspace->d_workspace->r, system->n, control->streams[4] );
     omega = 1.0;
     rho = 1.0;
 
@@ -1905,7 +2475,7 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
     for ( i = 0; i < control->cm_solver_max_iters && r_norm / b_norm > tol; ++i )
     {
         redux[0] = Dot_local( workspace, workspace->d_workspace->r_hat,
-                workspace->d_workspace->r, system->n );
+                workspace->d_workspace->r, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1929,23 +2499,27 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
             beta = (rho / rho_old) * (alpha / omega);
             Vector_Sum( workspace->d_workspace->q,
                     1.0, workspace->d_workspace->p,
-                    -1.0 * omega, workspace->d_workspace->z, system->n );
+                    -1.0 * omega, workspace->d_workspace->z, system->n, control->streams[4] );
             Vector_Sum( workspace->d_workspace->p,
                     1.0, workspace->d_workspace->r,
-                    beta, workspace->d_workspace->q, system->n );
+                    beta, workspace->d_workspace->q, system->n, control->streams[4] );
         }
         else
         {
             Vector_Copy( workspace->d_workspace->p,
-                    workspace->d_workspace->r, system->n );
+                    workspace->d_workspace->r, system->n, control->streams[4] );
         }
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->p,
-                workspace->d_workspace->d, system->n );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->p, workspace->d_workspace->y,
+                i == 0 ? fresh_pre : FALSE, LEFT );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->y, workspace->d_workspace->d,
+                i == 0 ? fresh_pre : FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -1959,7 +2533,7 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
 #endif
 
         redux[0] = Dot_local( workspace, workspace->d_workspace->r_hat,
-                workspace->d_workspace->z, system->n );
+                workspace->d_workspace->z, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1977,9 +2551,9 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
         alpha = rho / tmp;
         Vector_Sum( workspace->d_workspace->q,
                 1.0, workspace->d_workspace->r,
-                -1.0 * alpha, workspace->d_workspace->z, system->n );
+                -1.0 * alpha, workspace->d_workspace->z, system->n, control->streams[4] );
         redux[0] = Dot_local( workspace, workspace->d_workspace->q,
-                workspace->d_workspace->q, system->n );
+                workspace->d_workspace->q, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -1997,7 +2571,7 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
         /* early convergence check */
         if ( tmp < tol )
         {
-            Vector_Add( x, alpha, workspace->d_workspace->d, system->n );
+            Vector_Add( x, alpha, workspace->d_workspace->d, system->n, control->streams[4] );
             break;
         }
 
@@ -2005,8 +2579,10 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-        jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->q,
-                workspace->d_workspace->q_hat, system->n );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->q, workspace->d_workspace->y, fresh_pre, LEFT );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->y, workspace->d_workspace->q_hat, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2020,9 +2596,9 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
 #endif
 
         redux[0] = Dot_local( workspace, workspace->d_workspace->y,
-                workspace->d_workspace->q, system->n );
+                workspace->d_workspace->q, system->n, control->streams[4] );
         redux[1] = Dot_local( workspace, workspace->d_workspace->y,
-                workspace->d_workspace->y, system->n );
+                workspace->d_workspace->y, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2041,13 +2617,13 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
         omega = sigma / tmp;
         Vector_Sum( workspace->d_workspace->g,
                 alpha, workspace->d_workspace->d,
-                omega, workspace->d_workspace->q_hat, system->n );
-        Vector_Add( x, 1.0, workspace->d_workspace->g, system->n );
+                omega, workspace->d_workspace->q_hat, system->n, control->streams[4] );
+        Vector_Add( x, 1.0, workspace->d_workspace->g, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->r,
                 1.0, workspace->d_workspace->q,
-                -1.0 * omega, workspace->d_workspace->y, system->n );
+                -1.0 * omega, workspace->d_workspace->y, system->n, control->streams[4] );
         redux[0] = Dot_local( workspace, workspace->d_workspace->r,
-                workspace->d_workspace->r, system->n );
+                workspace->d_workspace->r, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2097,7 +2673,7 @@ int Hip_BiCGStab( reax_system const * const system, control_params const * const
 int Hip_dual_PIPECG( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, rvec2 const * const b, real tol,
-        rvec2 * const x, mpi_datatypes * const mpi_data )
+        rvec2 * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i, matvecs;
     int ret;
@@ -2116,14 +2692,16 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
 #endif
 
     Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, b,
-            -1.0, -1.0, workspace->d_workspace->u2, system->n );
+            -1.0, -1.0, workspace->d_workspace->u2, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r2,
-            workspace->d_workspace->u2, system->n );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r2, workspace->d_workspace->m2, fresh_pre, LEFT );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->m2, workspace->d_workspace->u2, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2136,13 +2714,13 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
     time = Get_Time( );
 #endif
 
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->w2,
-            workspace->d_workspace->u2, system->n, &redux[0], &redux[1] );
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-            workspace->d_workspace->u2, system->n, &redux[2], &redux[3] );
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->u2,
-            workspace->d_workspace->u2, system->n, &redux[4], &redux[5] );
-    Dot_local_rvec2( control, workspace, b, b, system->n, &redux[6], &redux[7] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->w2,
+            workspace->d_workspace->u2, system->n, &redux[0], &redux[1], control->streams[4] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+            workspace->d_workspace->u2, system->n, &redux[2], &redux[3], control->streams[4] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->u2,
+            workspace->d_workspace->u2, system->n, &redux[4], &redux[5], control->streams[4] );
+    Dot_local_rvec2( workspace, b, b, system->n, &redux[6], &redux[7], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2152,8 +2730,10 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
             MPI_COMM_WORLD, &req );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-    dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->w2,
-            workspace->d_workspace->m2, system->n );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->w2, workspace->d_workspace->n2, FALSE, LEFT );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->n2, workspace->d_workspace->m2, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2204,27 +2784,27 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
         }
 
         Vector_Sum_rvec2( workspace->d_workspace->z2, 1.0, 1.0, workspace->d_workspace->n2,
-                beta[0], beta[1], workspace->d_workspace->z2, system->n );
+                beta[0], beta[1], workspace->d_workspace->z2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->q2, 1.0, 1.0, workspace->d_workspace->m2,
-                beta[0], beta[1], workspace->d_workspace->q2, system->n );
+                beta[0], beta[1], workspace->d_workspace->q2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->p2, 1.0, 1.0, workspace->d_workspace->u2,
-                beta[0], beta[1], workspace->d_workspace->p2, system->n );
+                beta[0], beta[1], workspace->d_workspace->p2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->d2, 1.0, 1.0, workspace->d_workspace->w2,
-                beta[0], beta[1], workspace->d_workspace->d2, system->n );
+                beta[0], beta[1], workspace->d_workspace->d2, system->n, control->streams[4] );
         Vector_Sum_rvec2( x, 1.0, 1.0, x,
-                alpha[0], alpha[1], workspace->d_workspace->p2, system->n );
+                alpha[0], alpha[1], workspace->d_workspace->p2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->u2, 1.0, 1.0, workspace->d_workspace->u2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->q2, system->n );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->q2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->w2, 1.0, 1.0, workspace->d_workspace->w2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->z2, system->n );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->z2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, workspace->d_workspace->r2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->d2, system->n );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->w2,
-                workspace->d_workspace->u2, system->n, &redux[0], &redux[1] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->r2,
-                workspace->d_workspace->u2, system->n, &redux[2], &redux[3] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->u2,
-                workspace->d_workspace->u2, system->n, &redux[4], &redux[5] );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->d2, system->n, control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->w2,
+                workspace->d_workspace->u2, system->n, &redux[0], &redux[1], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->r2,
+                workspace->d_workspace->u2, system->n, &redux[2], &redux[3], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->u2,
+                workspace->d_workspace->u2, system->n, &redux[4], &redux[5], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2234,8 +2814,10 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
                 MPI_COMM_WORLD, &req );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->w2,
-                workspace->d_workspace->m2, system->n );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->w2, workspace->d_workspace->n2, FALSE, LEFT );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->n2, workspace->d_workspace->m2, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2269,27 +2851,27 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
             && r_norm[1] / b_norm[1] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->t,
-                workspace->d_workspace->x, 1, system->n );
+                workspace->d_workspace->x, 1, system->n, control->streams[4] );
 
         matvecs = Hip_PIPECG( system, control, data, workspace, H,
                 workspace->d_workspace->b_t, tol,
-                workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->t, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->t, 1, system->n );
+                workspace->d_workspace->t, 1, system->n, control->streams[4] );
     }
     else if ( r_norm[1] / b_norm[1] <= tol
             && r_norm[0] / b_norm[0] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->s,
-                workspace->d_workspace->x, 0, system->n );
+                workspace->d_workspace->x, 0, system->n, control->streams[4] );
 
         matvecs = Hip_PIPECG( system, control, data, workspace, H,
                 workspace->d_workspace->b_s, tol,
-                workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->s, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->s, 0, system->n );
+                workspace->d_workspace->s, 0, system->n, control->streams[4] );
     }
     else
     {
@@ -2320,7 +2902,7 @@ int Hip_dual_PIPECG( reax_system const * const system, control_params const * co
 int Hip_PIPECG( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, real const * const b, real tol,
-        real * const x, mpi_datatypes * const mpi_data )
+        real * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i;
     int ret;
@@ -2339,14 +2921,16 @@ int Hip_PIPECG( reax_system const * const system, control_params const * const c
 #endif
 
     Vector_Sum( workspace->d_workspace->r, 1.0, b,
-            -1.0, workspace->d_workspace->u, system->n );
+            -1.0, workspace->d_workspace->u, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r,
-            workspace->d_workspace->u, system->n );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r, workspace->d_workspace->m, fresh_pre, LEFT );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->m, workspace->d_workspace->u, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2360,12 +2944,12 @@ int Hip_PIPECG( reax_system const * const system, control_params const * const c
 #endif
 
     redux[0] = Dot_local( workspace, workspace->d_workspace->w,
-            workspace->d_workspace->u, system->n );
+            workspace->d_workspace->u, system->n, control->streams[4] );
     redux[1] = Dot_local( workspace, workspace->d_workspace->r,
-            workspace->d_workspace->u, system->n );
+            workspace->d_workspace->u, system->n, control->streams[4] );
     redux[2] = Dot_local( workspace, workspace->d_workspace->u,
-            workspace->d_workspace->u, system->n );
-    redux[3] = Dot_local( workspace, b, b, system->n );
+            workspace->d_workspace->u, system->n, control->streams[4] );
+    redux[3] = Dot_local( workspace, b, b, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2375,8 +2959,10 @@ int Hip_PIPECG( reax_system const * const system, control_params const * const c
             MPI_COMM_WORLD, &req );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-    jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->w,
-            workspace->d_workspace->m, system->n );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->w, workspace->d_workspace->n, FALSE, LEFT );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->n, workspace->d_workspace->m, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2414,27 +3000,27 @@ int Hip_PIPECG( reax_system const * const system, control_params const * const c
         }
 
         Vector_Sum( workspace->d_workspace->z, 1.0, workspace->d_workspace->n,
-                beta, workspace->d_workspace->z, system->n );
+                beta, workspace->d_workspace->z, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->q, 1.0, workspace->d_workspace->m,
-                beta, workspace->d_workspace->q, system->n );
+                beta, workspace->d_workspace->q, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->p, 1.0, workspace->d_workspace->u,
-                beta, workspace->d_workspace->p, system->n );
+                beta, workspace->d_workspace->p, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->d, 1.0, workspace->d_workspace->w,
-                beta, workspace->d_workspace->d, system->n );
+                beta, workspace->d_workspace->d, system->n, control->streams[4] );
         Vector_Sum( x, 1.0, x,
-                alpha, workspace->d_workspace->p, system->n );
+                alpha, workspace->d_workspace->p, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->u, 1.0, workspace->d_workspace->u,
-                -1.0 * alpha, workspace->d_workspace->q, system->n );
+                -1.0 * alpha, workspace->d_workspace->q, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->w, 1.0, workspace->d_workspace->w,
-                -1.0 * alpha, workspace->d_workspace->z, system->n );
+                -1.0 * alpha, workspace->d_workspace->z, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->r, 1.0, workspace->d_workspace->r,
-                -1.0 * alpha, workspace->d_workspace->d, system->n );
+                -1.0 * alpha, workspace->d_workspace->d, system->n, control->streams[4] );
         redux[0] = Dot_local( workspace, workspace->d_workspace->w,
-                workspace->d_workspace->u, system->n );
+                workspace->d_workspace->u, system->n, control->streams[4] );
         redux[1] = Dot_local( workspace, workspace->d_workspace->r,
-                workspace->d_workspace->u, system->n );
+                workspace->d_workspace->u, system->n, control->streams[4] );
         redux[2] = Dot_local( workspace, workspace->d_workspace->u,
-                workspace->d_workspace->u, system->n );
+                workspace->d_workspace->u, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2444,8 +3030,10 @@ int Hip_PIPECG( reax_system const * const system, control_params const * const c
                 MPI_COMM_WORLD, &req );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->w,
-                workspace->d_workspace->m, system->n );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->w, workspace->d_workspace->n, FALSE, LEFT );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->n, workspace->d_workspace->m, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
@@ -2492,7 +3080,7 @@ int Hip_PIPECG( reax_system const * const system, control_params const * const c
 int Hip_dual_PIPECR( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, rvec2 const * const b, real tol,
-        rvec2 * const x, mpi_datatypes * const mpi_data )
+        rvec2 * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i, matvecs;
     int ret;
@@ -2511,22 +3099,24 @@ int Hip_dual_PIPECR( reax_system const * const system, control_params const * co
 #endif
 
     Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, b,
-            -1.0, -1.0, workspace->d_workspace->u2, system->n );
+            -1.0, -1.0, workspace->d_workspace->u2, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r2,
-            workspace->d_workspace->u2, system->n );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r2, workspace->d_workspace->n2, fresh_pre, LEFT );
+    dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->n2, workspace->d_workspace->u2, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-    Dot_local_rvec2( control, workspace, b, b, system->n, &redux[0], &redux[1] );
-    Dot_local_rvec2( control, workspace, workspace->d_workspace->u2,
-            workspace->d_workspace->u2, system->n, &redux[2], &redux[3] );
+    Dot_local_rvec2( workspace, b, b, system->n, &redux[0], &redux[1], control->streams[4] );
+    Dot_local_rvec2( workspace, workspace->d_workspace->u2,
+            workspace->d_workspace->u2, system->n, &redux[2], &redux[3], control->streams[4] );
 
     ret = MPI_Iallreduce( MPI_IN_PLACE, redux, 4, MPI_DOUBLE, MPI_SUM,
             MPI_COMM_WORLD, &req );
@@ -2561,19 +3151,21 @@ int Hip_dual_PIPECR( reax_system const * const system, control_params const * co
             break;
         }
 
-        dual_jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->w2,
-                workspace->d_workspace->m2, system->n );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->w2, workspace->d_workspace->n2, FALSE, LEFT );
+        dual_apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->n2, workspace->d_workspace->m2, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->w2,
-                workspace->d_workspace->u2, system->n, &redux[0], &redux[1] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->m2,
-                workspace->d_workspace->w2, system->n, &redux[2], &redux[3] );
-        Dot_local_rvec2( control, workspace, workspace->d_workspace->u2,
-                workspace->d_workspace->u2, system->n, &redux[4], &redux[5] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->w2,
+                workspace->d_workspace->u2, system->n, &redux[0], &redux[1], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->m2,
+                workspace->d_workspace->w2, system->n, &redux[2], &redux[3], control->streams[4] );
+        Dot_local_rvec2( workspace, workspace->d_workspace->u2,
+                workspace->d_workspace->u2, system->n, &redux[4], &redux[5], control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2619,21 +3211,21 @@ int Hip_dual_PIPECR( reax_system const * const system, control_params const * co
         }
 
         Vector_Sum_rvec2( workspace->d_workspace->z2, 1.0, 1.0, workspace->d_workspace->n2,
-                beta[0], beta[1], workspace->d_workspace->z2, system->n );
+                beta[0], beta[1], workspace->d_workspace->z2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->q2, 1.0, 1.0, workspace->d_workspace->m2,
-                beta[0], beta[1], workspace->d_workspace->q2, system->n );
+                beta[0], beta[1], workspace->d_workspace->q2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->p2, 1.0, 1.0, workspace->d_workspace->u2,
-                beta[0], beta[1], workspace->d_workspace->p2, system->n );
+                beta[0], beta[1], workspace->d_workspace->p2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->d2, 1.0, 1.0, workspace->d_workspace->w2,
-                beta[0], beta[1], workspace->d_workspace->d2, system->n );
+                beta[0], beta[1], workspace->d_workspace->d2, system->n, control->streams[4] );
         Vector_Sum_rvec2( x, 1.0, 1.0, x,
-                alpha[0], alpha[1], workspace->d_workspace->p2, system->n );
+                alpha[0], alpha[1], workspace->d_workspace->p2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->u2, 1.0, 1.0, workspace->d_workspace->u2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->q2, system->n );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->q2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->w2, 1.0, 1.0, workspace->d_workspace->w2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->z2, system->n );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->z2, system->n, control->streams[4] );
         Vector_Sum_rvec2( workspace->d_workspace->r2, 1.0, 1.0, workspace->d_workspace->r2,
-                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->d2, system->n );
+                -1.0 * alpha[0], -1.0 * alpha[1], workspace->d_workspace->d2, system->n, control->streams[4] );
 
         gamma_old[0] = gamma_new[0];
         gamma_old[1] = gamma_new[1];
@@ -2647,27 +3239,27 @@ int Hip_dual_PIPECR( reax_system const * const system, control_params const * co
             && r_norm[1] / b_norm[1] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->t,
-                workspace->d_workspace->x, 1, system->n );
+                workspace->d_workspace->x, 1, system->n, control->streams[4] );
 
         matvecs = Hip_PIPECR( system, control, data, workspace, H,
                 workspace->d_workspace->b_t, tol,
-                workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->t, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->t, 1, system->n );
+                workspace->d_workspace->t, 1, system->n, control->streams[4] );
     }
     else if ( r_norm[1] / b_norm[1] <= tol
             && r_norm[0] / b_norm[0] > tol )
     {
         Vector_Copy_From_rvec2( workspace->d_workspace->s,
-                workspace->d_workspace->x, 0, system->n );
+                workspace->d_workspace->x, 0, system->n, control->streams[4] );
 
         matvecs = Hip_PIPECR( system, control, data, workspace, H,
                 workspace->d_workspace->b_s, tol,
-                workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->s, mpi_data, FALSE );
 
         Vector_Copy_To_rvec2( workspace->d_workspace->x,
-                workspace->d_workspace->s, 0, system->n );
+                workspace->d_workspace->s, 0, system->n, control->streams[4] );
     }
     else
     {
@@ -2695,7 +3287,7 @@ int Hip_dual_PIPECR( reax_system const * const system, control_params const * co
 int Hip_PIPECR( reax_system const * const system, control_params const * const control,
         simulation_data * const data, storage * const workspace,
         sparse_matrix const * const H, real const * const b, real tol,
-        real * const x, mpi_datatypes * const mpi_data )
+        real * const x, mpi_datatypes * const mpi_data, int fresh_pre )
 {
     unsigned int i;
     int ret;
@@ -2714,22 +3306,24 @@ int Hip_PIPECR( reax_system const * const system, control_params const * const c
 #endif
 
     Vector_Sum( workspace->d_workspace->r, 1.0, b,
-            -1.0, workspace->d_workspace->u, system->n );
+            -1.0, workspace->d_workspace->u, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
 #endif
 
-    jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->r,
-            workspace->d_workspace->u, system->n );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->r, workspace->d_workspace->n, fresh_pre, LEFT );
+    apply_preconditioner( system, workspace, control, data, mpi_data,
+            workspace->d_workspace->n, workspace->d_workspace->u, fresh_pre, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
-    redux[0] = Dot_local( workspace, b, b, system->n );
+    redux[0] = Dot_local( workspace, b, b, system->n, control->streams[4] );
     redux[1] = Dot_local( workspace, workspace->d_workspace->u,
-            workspace->d_workspace->u, system->n );
+            workspace->d_workspace->u, system->n, control->streams[4] );
 
     ret = MPI_Iallreduce( MPI_IN_PLACE, redux, 2, MPI_DOUBLE, MPI_SUM,
             MPI_COMM_WORLD, &req );
@@ -2757,19 +3351,21 @@ int Hip_PIPECR( reax_system const * const system, control_params const * const c
 
     for ( i = 0; i < control->cm_solver_max_iters && r_norm / b_norm > tol; ++i )
     {
-        jacobi_apply( workspace->d_workspace->Hdia_inv, workspace->d_workspace->w,
-                workspace->d_workspace->m, system->n );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->w, workspace->d_workspace->n, FALSE, LEFT );
+        apply_preconditioner( system, workspace, control, data, mpi_data,
+                workspace->d_workspace->n, workspace->d_workspace->m, FALSE, RIGHT );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_pre_app );
 #endif
 
         redux[0] = Dot_local( workspace, workspace->d_workspace->w,
-                workspace->d_workspace->u, system->n );
+                workspace->d_workspace->u, system->n, control->streams[4] );
         redux[1] = Dot_local( workspace, workspace->d_workspace->m,
-                workspace->d_workspace->w, system->n );
+                workspace->d_workspace->w, system->n, control->streams[4] );
         redux[2] = Dot_local( workspace, workspace->d_workspace->u,
-                workspace->d_workspace->u, system->n );
+                workspace->d_workspace->u, system->n, control->streams[4] );
 
 #if defined(LOG_PERFORMANCE)
         Update_Timing_Info( &time, &data->timing.cm_solver_vector_ops );
@@ -2808,21 +3404,21 @@ int Hip_PIPECR( reax_system const * const system, control_params const * const c
         }
 
         Vector_Sum( workspace->d_workspace->z, 1.0, workspace->d_workspace->n,
-                beta, workspace->d_workspace->z, system->n );
+                beta, workspace->d_workspace->z, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->q, 1.0, workspace->d_workspace->m,
-                beta, workspace->d_workspace->q, system->n );
+                beta, workspace->d_workspace->q, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->p, 1.0, workspace->d_workspace->u,
-                beta, workspace->d_workspace->p, system->n );
+                beta, workspace->d_workspace->p, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->d, 1.0, workspace->d_workspace->w,
-                beta, workspace->d_workspace->d, system->n );
+                beta, workspace->d_workspace->d, system->n, control->streams[4] );
         Vector_Sum( x, 1.0, x,
-                alpha, workspace->d_workspace->p, system->n );
+                alpha, workspace->d_workspace->p, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->u, 1.0, workspace->d_workspace->u,
-                -1.0 * alpha, workspace->d_workspace->q, system->n );
+                -1.0 * alpha, workspace->d_workspace->q, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->w, 1.0, workspace->d_workspace->w,
-                -1.0 * alpha, workspace->d_workspace->z, system->n );
+                -1.0 * alpha, workspace->d_workspace->z, system->n, control->streams[4] );
         Vector_Sum( workspace->d_workspace->r, 1.0, workspace->d_workspace->r,
-                -1.0 * alpha, workspace->d_workspace->d, system->n );
+                -1.0 * alpha, workspace->d_workspace->d, system->n, control->streams[4] );
 
         gamma_old = gamma_new;
 

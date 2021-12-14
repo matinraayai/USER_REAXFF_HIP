@@ -1,4 +1,28 @@
-#if defined(PURE_REAX)
+
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_init_md.h"
+
+    #include "reaxff_hip_allocate.h"
+    #include "reaxff_hip_list.h"
+    #include "reaxff_hip_copy.h"
+    #include "reaxff_hip_environment.h"
+    #include "reaxff_hip_forces.h"
+    #include "reaxff_hip_integrate.h"
+    #include "reaxff_hip_neighbors.h"
+    #include "reaxff_hip_reset_tools.h"
+    #include "reaxff_hip_system_props.h"
+
+    #include "reaxff_box.h"
+    #include "reaxff_comm_tools.h"
+    #include "reaxff_grid.h"
+    #include "reaxff_init_md.h"
+    #include "reaxff_io_tools.h"
+    #include "reaxff_lookup.h"
+    #include "reaxff_random.h"
+    #include "reaxff_reset_tools.h"
+    #include "reaxff_tool_box.h"
+    #include "reaxff_vector.h"
+#else
     #include "hip_init_md.h"
 
     #include "hip_allocate.h"
@@ -21,46 +45,22 @@
     #include "../reset_tools.h"
     #include "../tool_box.h"
     #include "../vector.h"
-#elif defined(LAMMPS_REAX)
-    #include "reaxff_hip_init_md.h"
-
-    #include "reaxff_hip_allocate.h"
-    #include "reaxff_hip_list.h"
-    #include "reaxff_hip_copy.h"
-    #include "reaxff_hip_environment.h"
-    #include "reaxff_hip_forces.h"
-    #include "reaxff_hip_integrate.h"
-    #include "reaxff_hip_neighbors.h"
-    #include "reaxff_hip_reset_tools.h"
-    #include "reaxff_hip_system_props.h"
-    #include "reaxff_hip_utils.h"
-
-    #include "reaxff_box.h"
-    #include "reaxff_comm_tools.h"
-    #include "reaxff_grid.h"
-    #include "reaxff_init_md.h"
-    #include "reaxff_io_tools.h"
-    #include "reaxff_lookup.h"
-    #include "reaxff_random.h"
-    #include "reaxff_reset_tools.h"
-    #include "reaxff_tool_box.h"
-    #include "reaxff_vector.h"
 #endif
 
 
 static void Hip_Init_System( reax_system *system, control_params *control,
         simulation_data *data, storage *workspace, mpi_datatypes *mpi_data )
 {
-//    Setup_New_Grid( system, control, MPI_COMM_WORLD );
+    Setup_New_Grid( system, control, MPI_COMM_WORLD );
 
     /* since all processors read in all atoms and select their local atoms
      * intially, no local atoms comm needed and just bin local atoms */
-//    Bin_My_Atoms( system, workspace );
-//    Reorder_My_Atoms( system, workspace );
+    Bin_My_Atoms( system, workspace );
+    Reorder_My_Atoms( system, workspace );
 
-//    system->N = SendRecv( system, mpi_data, mpi_data->boundary_atom_type,
-//            &Count_Boundary_Atoms, &Sort_Boundary_Atoms,
-//            &Unpack_Exchange_Message, TRUE );
+    system->N = SendRecv( system, mpi_data, mpi_data->boundary_atom_type,
+            &Count_Boundary_Atoms, &Sort_Boundary_Atoms,
+            &Unpack_Exchange_Message, TRUE );
 
     system->local_cap = MAX( (int) CEIL( system->n * SAFE_ZONE ), MIN_CAP );
     system->total_cap = MAX( (int) CEIL( system->N * SAFE_ZONE ), MIN_CAP );
@@ -71,38 +71,38 @@ static void Hip_Init_System( reax_system *system, control_params *control,
     system->total_cm_entries = 0;
     system->total_thbodies = 0;
 
-//    Bin_Boundary_Atoms( system );
+    Bin_Boundary_Atoms( system );
 
     Hip_Init_Block_Sizes( system, control );
 
-    Hip_Allocate_System( system );
-    Hip_Copy_System_Host_to_Device( system );
+    Hip_Allocate_System( system, control );
+    Hip_Copy_System_Host_to_Device( system, control );
 
     Hip_Reset_Atoms_HBond_Indices( system, control, workspace );
 
-//    Hip_Compute_Total_Mass( system, control, workspace,
-//            data, mpi_data->comm_mesh3D );
+    Hip_Compute_Total_Mass( system, control, workspace,
+            data, mpi_data->comm_mesh3D );
 
-//    Hip_Compute_Center_of_Mass( system, control, workspace,
-//            data, mpi_data, mpi_data->comm_mesh3D );
+    Hip_Compute_Center_of_Mass( system, control, workspace,
+            data, mpi_data, mpi_data->comm_mesh3D );
 
 //    Reposition_Atoms( system, control, data, mpi_data );
 
     /* initialize velocities so that desired init T can be attained */
-//    if ( !control->restart || (control->restart && control->random_vel) )
-//    {
-//        Hip_Generate_Initial_Velocities( system, control, control->T_init );
-//    }
-//
-//    Hip_Compute_Kinetic_Energy( system, control, workspace,
-//            data, mpi_data->comm_mesh3D );
+    if ( !control->restart || (control->restart && control->random_vel) )
+    {
+        Hip_Generate_Initial_Velocities( system, control, control->T_init );
+    }
+
+    Hip_Compute_Kinetic_Energy( system, control, workspace,
+            data, mpi_data->comm_mesh3D );
 }
 
 
 void Hip_Init_Simulation_Data( reax_system *system, control_params *control,
         simulation_data *data )
 {
-    Hip_Allocate_Simulation_Data( data );
+    Hip_Allocate_Simulation_Data( data, control->streams[0] );
 
     Reset_Simulation_Data( data );
     Reset_Timing( &data->timing );
@@ -205,7 +205,20 @@ void Hip_Init_Workspace( reax_system *system, control_params *control,
     workspace->d_workspace->realloc.thbody = FALSE;
     workspace->d_workspace->realloc.gcell_atoms = 0;
 
-    Hip_Reset_Workspace( system, workspace );
+    if ( control->cm_solver_pre_comp_type == SAI_PC )
+    {
+        workspace->H.allocated = FALSE;
+        workspace->H_full.allocated = FALSE;
+        workspace->H_spar_patt.allocated = FALSE;
+        workspace->H_spar_patt_full.allocated = FALSE;
+        workspace->H_app_inv.allocated = FALSE;
+        workspace->d_workspace->H_full.allocated = FALSE;
+        workspace->d_workspace->H_spar_patt.allocated = FALSE;
+        workspace->d_workspace->H_spar_patt_full.allocated = FALSE;
+        workspace->d_workspace->H_app_inv.allocated = FALSE;
+    }
+
+    Hip_Reset_Workspace( system, control, workspace );
 
     Init_Taper( control, workspace->d_workspace, mpi_data );
 }
@@ -215,34 +228,40 @@ void Hip_Init_Lists( reax_system *system, control_params *control,
         simulation_data *data, storage *workspace, reax_list **lists,
         mpi_datatypes *mpi_data )
 {
-    Hip_Estimate_Storages( system, control, workspace, lists, TRUE, TRUE, TRUE, data->step);
+    Hip_Estimate_Num_Neighbors( system, control, data );
 
     Hip_Make_List( system->total_cap, system->total_far_nbrs,
             TYP_FAR_NEIGHBOR, lists[FAR_NBRS] );
-    Hip_Init_Neighbor_Indices( system, lists[FAR_NBRS] );
+    Hip_Init_Neighbor_Indices( system, control, lists[FAR_NBRS] );
 
-//    Hip_Generate_Neighbor_Lists( system, data, workspace, lists );
+    Hip_Generate_Neighbor_Lists( system, control, data, workspace, lists );
 
-    /* first call to Hip_Estimate_Storages requires setting these manually before allocation */
-//    workspace->d_workspace->H.n = system->n;
-//    workspace->d_workspace->H.n_max = system->local_cap;
-//    workspace->d_workspace->H.format = SYM_FULL_MATRIX;
-//
-//    /* estimate storage for bonds, hbonds, and sparse matrix */
-//    Hip_Estimate_Storages( system, control, workspace, lists,
-//            TRUE, TRUE, TRUE, data->step - data->prev_steps );
+    /* first call to Hip_Estimate_Storages requires
+     * setting these manually before allocation */
+    workspace->d_workspace->H.n = system->n;
+    workspace->d_workspace->H.n_max = system->local_cap;
+    workspace->d_workspace->H.format = SYM_FULL_MATRIX;
 
-//    Hip_Allocate_Matrix( &workspace->d_workspace->H, system->n,
-//            system->local_cap, system->total_cm_entries, SYM_FULL_MATRIX );
-//    Hip_Init_Sparse_Matrix_Indices( system, &workspace->d_workspace->H );
+    /* estimate storage for bonds, hbonds, and sparse matrix */
+    Hip_Estimate_Storages( system, control, workspace, lists,
+            TRUE, TRUE, TRUE, data->step - data->prev_steps );
 
-    Hip_Make_List( system->total_cap, system->total_bonds, TYP_BOND, lists[BONDS] );
-    Hip_Init_Bond_Indices( system, lists[BONDS] );
+    Hip_Allocate_Matrix( &workspace->d_workspace->H, system->n,
+            system->local_cap, system->total_cm_entries, SYM_FULL_MATRIX,
+            control->streams[0] );
+    Hip_Init_Sparse_Matrix_Indices( system, &workspace->d_workspace->H,
+           control->streams[0] );
+
+    Hip_Make_List( system->total_cap, system->total_bonds,
+            TYP_BOND, lists[BONDS] );
+    Hip_Init_Bond_Indices( system, lists[BONDS], control->streams[0] );
 
     if ( control->hbond_cut > 0.0 && system->numH > 0 )
     {
-        Hip_Make_List( system->total_cap, system->total_hbonds, TYP_HBOND, lists[HBONDS] );
-        Hip_Init_HBond_Indices( system, workspace, lists[HBONDS] );
+        Hip_Make_List( system->total_cap, system->total_hbonds,
+                TYP_HBOND, lists[HBONDS] );
+        Hip_Init_HBond_Indices( system, workspace, lists[HBONDS],
+                control->streams[0] );
     }
 
     /* 3bodies list: since a more accurate estimate of the num.
@@ -256,9 +275,11 @@ extern "C" void Hip_Initialize( reax_system *system, control_params *control,
         reax_list **lists, output_controls *out_control,
         mpi_datatypes *mpi_data )
 {
+    int i;
+
     Init_MPI_Datatypes( system, workspace, mpi_data );
 
-#if defined(CUDA_DEVICE_PACK)
+#if defined(HIP_DEVICE_PACK)
     if ( MPIX_Query_cuda_support( ) != 1 )
     {
         fprintf( stderr, "[ERROR] HIP device-side MPI buffer packing/unpacking enabled "
@@ -271,7 +292,7 @@ extern "C" void Hip_Initialize( reax_system *system, control_params *control,
     mpi_data->d_in2_buffer = NULL;
     mpi_data->d_in2_buffer_size = 0;
 
-    for ( int i = 0; i < MAX_NBRS; ++i )
+    for ( i = 0; i < MAX_NBRS; ++i )
     {
         mpi_data->d_out_buffers[i].cnt = 0;
         mpi_data->d_out_buffers[i].index = NULL;
@@ -285,8 +306,11 @@ extern "C" void Hip_Initialize( reax_system *system, control_params *control,
 
     /* scratch space - set before Hip_Init_Workspace
      * as Hip_Init_System utilizes these variables */
-    workspace->scratch = NULL;
-    workspace->scratch_size = 0;
+    for ( i = 0; i < MAX_HIP_STREAMS; ++i )
+    {
+        workspace->scratch[i] = NULL;
+        workspace->scratch_size[i] = 0;
+    }
     workspace->host_scratch = NULL;
     workspace->host_scratch_size = 0;
 
@@ -294,8 +318,8 @@ extern "C" void Hip_Initialize( reax_system *system, control_params *control,
     /* reset for step 0 */
     Reset_Simulation_Data( data );
 
-    Hip_Allocate_Grid( system );
-    Hip_Copy_Grid_Host_to_Device( &system->my_grid, &system->d_my_grid );
+    Hip_Allocate_Grid( system, control );
+    Hip_Copy_Grid_Host_to_Device( control, &system->my_grid, &system->d_my_grid );
 
     Hip_Init_Workspace( system, control, workspace, mpi_data );
 
@@ -311,6 +335,6 @@ extern "C" void Hip_Initialize( reax_system *system, control_params *control,
     }
 
 #if defined(DEBUG_FOCUS)
-    Hip_Print_Mem_Usage( );
+    Hip_Print_Mem_Usage( data );
 #endif
 }

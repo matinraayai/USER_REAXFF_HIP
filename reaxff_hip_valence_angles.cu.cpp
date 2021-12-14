@@ -1,4 +1,3 @@
-#include "hip/hip_runtime.h"
 /*----------------------------------------------------------------------
   PuReMD - Purdue ReaxFF Molecular Dynamics Program
 
@@ -20,23 +19,37 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#include "reaxff_hip_valence_angles.h"
+#if defined(LAMMPS_REAX)
+    #include "hip_valence_angles.h"
 
-#if defined(CUDA_ACCUM_ATOMIC)
-#include "reaxff_hip_helpers.h"
+    #if defined(HIP_ACCUM_ATOMIC)
+        #include "hip_helpers.h"
+    #endif
+    #include "hip_list.h"
+    #include "hip_reduction.h"
+    #include "hip_utils.h"
+
+    #include "../index_utils.h"
+    #include "../vector.h"
+#else
+    #include "hip_valence_angles.h"
+
+    #if defined(HIP_ACCUM_ATOMIC)
+    #include "hip_helpers.h"
+    #endif
+    #include "hip_list.h"
+    #include "hip_reduction.h"
+    #include "hip_utils.h"
+
+    #include "../index_utils.h"
+    #include "../vector.h"
 #endif
-#include "reaxff_hip_list.h"
-#include "reaxff_hip_reduction.h"
-#include "reaxff_hip_utils.h"
 
-#include "reaxff_hip_index_utils.h"
-#include "reaxff_vector.h"
-
+#include "hip/hip_runtime.h"
 #include <hipcub/hipcub.hpp>
 
 
 
-#define FULL_MASK (0xFFFFFFFF)
 
 
 /**
@@ -54,16 +67,17 @@ struct Prod
 
 /* Compute 3-body interactions, in which the main role is played by
    atom j, which sits in the middle of the other two atoms i and k. */
-HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
-        global_parameters gp, single_body_parameters *sbp, three_body_header *d_thbh,
-        control_params *control, storage workspace, reax_list bond_list,
+HIP_GLOBAL void k_valence_angles_part1( reax_atom const * const my_atoms,
+        global_parameters gp, single_body_parameters const * const sbp,
+        three_body_header const * const thbh, control_params const * const control,
+        storage workspace, reax_list bond_list,
         reax_list thb_list, int n, int N, int num_atom_types,
-        real *e_ang_g, real *e_pen_g, real *e_coa_g )
+        real * const e_ang_g, real * const e_pen_g, real * const e_coa_g )
 {
     int i, j, pi, k, pk, t;
     int type_i, type_j, type_k;
     int start_j, end_j;
-    int cnt, num_thb_intrs;
+    int cnt, num_thb_intrs, thbh_ijk;
     real temp, temp_bo_jt, pBOjt7;
     real p_val1, p_val2, p_val3, p_val4, p_val5;
     real p_val6, p_val7, p_val8, p_val9, p_val10;
@@ -74,15 +88,14 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
     real dSBO1, dSBO2, SBO, SBO2, CSBO2, SBOp, prod_SBO, vlpadj;
     real CEval1, CEval2, CEval3, CEval4, CEval5, CEval6, CEval7, CEval8;
     real CEpen1, CEpen2, CEpen3;
-    real e_ang_l, e_coa, e_coa_l, e_pen, e_pen_l;
+    real e_ang_, e_coa, e_coa_, e_pen, e_pen_;
     real CEcoa1, CEcoa2, CEcoa3, CEcoa4, CEcoa5;
     real Cf7ij, Cf7jk, Cf8j, Cf9j;
     real f7_ij, f7_jk, f8_Dj, f9_Dj;
     real Ctheta_0, theta_0, theta_00, theta, cos_theta, sin_theta;
     real BOA_ij, BOA_jk;
-    rvec f_j_l;
-    three_body_header *thbh;
-    three_body_parameters *thbp;
+    real Cdbo_ij, CdDelta_i, CdDelta_j;
+    rvec f_i, f_j;
     three_body_interaction_data *p_ijk;
     bond_data *pbond_ij, *pbond_jk, *pbond_jt;
     bond_order_data *bo_ij, *bo_jk, *bo_jt;
@@ -104,16 +117,17 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
     p_val8 = gp.l[33];
     p_val9 = gp.l[16];
     p_val10 = gp.l[17];
-    e_ang_l = 0.0;
-    e_coa_l = 0.0;
-    e_pen_l = 0.0;
-    rvec_MakeZero( f_j_l );
+    e_ang_ = 0.0;
+    e_coa_ = 0.0;
+    e_pen_ = 0.0;
+    CdDelta_j = 0.0;
+    rvec_MakeZero( f_j );
 
     type_j = my_atoms[j].type;
     start_j = Start_Index( j, &bond_list );
     end_j = End_Index( j, &bond_list );
-    p_val3 = sbp[ type_j ].p_val3;
-    p_val5 = sbp[ type_j ].p_val5;
+    p_val3 = sbp[type_j].p_val3;
+    p_val5 = sbp[type_j].p_val5;
 
     /* sum of pi and pi-pi BO terms for all neighbors of atom j,
      * used in determining the equilibrium angle between i-j-k */
@@ -181,6 +195,9 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
         {
             i = pbond_ij->nbr;
             type_i = my_atoms[i].type;
+            Cdbo_ij = 0.0;
+            CdDelta_i = 0.0;
+            rvec_MakeZero( f_i );
 
             /* compute _ALL_ 3-body intrs */
             for ( pk = start_j; pk < end_j; ++pk )
@@ -232,18 +249,17 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
                     continue;
                 }
 
-                thbh = &d_thbh[
-                    index_thbp(type_i, type_j, type_k, num_atom_types) ];
+                thbh_ijk = index_thbp(type_i, type_j, type_k, num_atom_types);
 
-                for ( cnt = 0; cnt < thbh->cnt; ++cnt )
+                for ( cnt = 0; cnt < thbh[thbh_ijk].cnt; ++cnt )
                 {
                     /* valence angle does not exist in the force field */
-                    if ( FABS(thbh->prm[cnt].p_val1) < 0.001 )
+                    if ( FABS(thbh[thbh_ijk].prm[cnt].p_val1) < 0.001 )
                     {
                         continue;
                     }
 
-                    thbp = &thbh->prm[cnt];
+                    three_body_parameters const * const thbp = &thbh[thbh_ijk].prm[cnt];
 
                     /* calculate valence angle energy */
                     p_val1 = thbp->p_val1;
@@ -299,7 +315,7 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
 
                     if ( pk < pi )
                     {
-                        e_ang_l += f7_ij * f7_jk * f8_Dj * expval12theta;
+                        e_ang_ += f7_ij * f7_jk * f8_Dj * expval12theta;
                     }
 
                     /* calculate penalty for double bonds in valency angles */
@@ -318,7 +334,7 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
                     e_pen = p_pen1 * f9_Dj * exp_pen2ij * exp_pen2jk;
                     if ( pk < pi )
                     {
-                        e_pen_l += e_pen;
+                        e_pen_ += e_pen;
                     }
 
                     CEpen1 = e_pen * Cf9j / f9_Dj;
@@ -339,7 +355,7 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
 
                     if ( pk < pi )
                     {
-                        e_coa_l += e_coa;
+                        e_coa_ += e_coa;
                     }
 
                     CEcoa1 = -2.0 * p_coa4 * (BOA_ij - 1.5) * e_coa;
@@ -351,17 +367,17 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
                     /* calculate force contributions */
                     if ( pk < pi )
                     {
-#if !defined(CUDA_ACCUM_ATOMIC)
-                        bo_ij->Cdbo += CEval1 + CEpen2 + (CEcoa1 - CEcoa4);
-                        bo_jk->Cdbo += CEval2 + CEpen3 + (CEcoa2 - CEcoa5);
-                        workspace.CdDelta[j] += (CEval3 + CEval7) + CEpen1 + CEcoa3;
-                        pbond_ij->va_CdDelta += CEcoa4;
+                        Cdbo_ij += CEval1 + CEpen2 + (CEcoa1 - CEcoa4);
+#if !defined(HIP_ACCUM_ATOMIC)
+                        atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
+#else
+                        atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
+#endif
+                        CdDelta_j += (CEval3 + CEval7) + CEpen1 + CEcoa3;
+                        CdDelta_i += CEcoa4;
+#if !defined(HIP_ACCUM_ATOMIC)
                         pbond_jk->va_CdDelta += CEcoa5;
 #else
-                        atomicAdd( &bo_ij->Cdbo, CEval1 + CEpen2 + (CEcoa1 - CEcoa4) );
-                        atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
-                        atomicAdd( &workspace.CdDelta[j], (CEval3 + CEval7) + CEpen1 + CEcoa3 );
-                        atomicAdd( &workspace.CdDelta[i], CEcoa4 );
                         atomicAdd( &workspace.CdDelta[k], CEcoa5 );
 #endif
 
@@ -373,7 +389,7 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
                             temp = CUBE( temp_bo_jt );
                             pBOjt7 = temp * temp * temp_bo_jt;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                             bo_jt->Cdbo += CEval6 * pBOjt7;
                             bo_jt->Cdbopi += CEval5;
                             bo_jt->Cdbopi2 += CEval5;
@@ -384,51 +400,62 @@ HIP_GLOBAL void k_valence_angles_part1( reax_atom *my_atoms,
 #endif
                         }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-                        rvec_ScaledAdd( pbond_ij->va_f, CEval8, p_ijk->dcos_di );
-                        rvec_ScaledAdd( f_j_l, CEval8, p_ijk->dcos_dj );
+                        rvec_ScaledAdd( f_i, CEval8, p_ijk->dcos_di );
+                        rvec_ScaledAdd( f_j, CEval8, p_ijk->dcos_dj );
+#if !defined(HIP_ACCUM_ATOMIC)
                         rvec_ScaledAdd( pbond_jk->va_f, CEval8, p_ijk->dcos_dk );
 #else
-                        atomic_rvecScaledAdd( workspace.f[i], CEval8, p_ijk->dcos_di );
-                        rvec_ScaledAdd( f_j_l, CEval8, p_ijk->dcos_dj );
                         atomic_rvecScaledAdd( workspace.f[k], CEval8, p_ijk->dcos_dk );
 #endif
                     }
                 }
             }
+
+#if !defined(HIP_ACCUM_ATOMIC)
+            bo_ij->Cdbo += Cdbo_ij;
+            pbond_ij->va_CdDelta += CdDelta_i;
+            rvec_Add( pbond_ij->va_f, f_i );
+#else
+            atomicAdd( &bo_ij->Cdbo, Cdbo_ij );
+            atomicAdd( &workspace.CdDelta[i], CdDelta_i );
+            atomic_rvecAdd( workspace.f[i], f_i );
+#endif
         }
 
         Set_End_Index( pi, num_thb_intrs, &thb_list );
     }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     rvec_Add( workspace.f[j], f_j_l );
-    e_ang_g[j] = e_ang_l;
-    e_coa_g[j] = e_coa_l;
-    e_pen_g[j] = e_pen_l;
+    atomicAdd( &workspace.CdDelta[j], CdDelta_j );
+    e_ang_g[j] = e_ang_;
+    e_coa_g[j] = e_coa_;
+    e_pen_g[j] = e_pen_;
 #else
-    atomic_rvecAdd( workspace.f[j], f_j_l );
-    atomicAdd( (double *) e_ang_g, (double) e_ang_l );
-    atomicAdd( (double *) e_coa_g, (double) e_coa_l );
-    atomicAdd( (double *) e_pen_g, (double) e_pen_l );
+    atomic_rvecAdd( workspace.f[j], f_j );
+    atomicAdd( &workspace.CdDelta[j], CdDelta_j );
+    atomicAdd( (double *) e_ang_g, (double) e_ang_ );
+    atomicAdd( (double *) e_coa_g, (double) e_coa_ );
+    atomicAdd( (double *) e_pen_g, (double) e_pen_ );
 #endif
 }
 
 
 /* Compute 3-body interactions, in which the main role is played by
    atom j, which sits in the middle of the other two atoms i and k. */
-HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
-        global_parameters gp, single_body_parameters *sbp, three_body_header *d_thbh,
-        control_params *control, storage workspace, reax_list bond_list,
+HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom const * const my_atoms,
+        global_parameters gp, single_body_parameters const * const sbp,
+        three_body_header const * const thbh, control_params const * const control,
+        storage workspace, reax_list bond_list,
         reax_list thb_list, int n, int N, int num_atom_types,
-        real *e_ang_g, real *e_pen_g, real *e_coa_g )
+        real * const e_ang_g, real * const e_pen_g, real * const e_coa_g )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpScan<int>::TempStorage, temp_i)
-    __shared__ hipcub::WarpReduce<double>::TempStorage *temp_d;
-    int i, j, pi, k, pk, t, thread_id, lane_id, itr;
+    extern __shared__ hipcub::WarpScan<int>::TempStorage temp_i[];
+    hipcub::WarpReduce<double>::TempStorage *temp_d;
+    int i, j, pi, k, pk, t, thread_id, warp_id, lane_id, itr;
     int type_i, type_j, type_k;
     int start_j, end_j;
-    int cnt, num_thb_intrs, offset, flag;
+    int cnt, num_thb_intrs, offset, flag, thbh_ijk;
     real temp, temp_bo_jt, pBOjt7;
     real p_val1, p_val2, p_val3, p_val4, p_val5;
     real p_val6, p_val7, p_val8, p_val9, p_val10;
@@ -439,15 +466,14 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
     real dSBO1, dSBO2, SBO, SBO2, CSBO2, SBOp, prod_SBO, vlpadj;
     real CEval1, CEval2, CEval3, CEval4, CEval5, CEval6, CEval7, CEval8;
     real CEpen1, CEpen2, CEpen3;
-    real e_ang_l, e_coa, e_coa_l, e_pen, e_pen_l;
+    real e_ang_, e_coa, e_coa_, e_pen, e_pen_;
     real CEcoa1, CEcoa2, CEcoa3, CEcoa4, CEcoa5;
     real Cf7ij, Cf7jk, Cf8j, Cf9j;
     real f7_ij, f7_jk, f8_Dj, f9_Dj;
     real Ctheta_0, theta_0, theta_00, theta, cos_theta, sin_theta;
     real BOA_ij, BOA_jk;
-    rvec f_j_l;
-    three_body_header *thbh;
-    three_body_parameters *thbp;
+    real Cdbo_ij, CdDelta_i, CdDelta_j;
+    rvec f_i, f_j;
     three_body_interaction_data *p_ijk;
     bond_data *pbond_ij, *pbond_jk, *pbond_jt;
     bond_order_data *bo_ij, *bo_jk, *bo_jt;
@@ -463,6 +489,7 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
     }
 
     temp_d = (hipcub::WarpReduce<double>::TempStorage *) &temp_i[blockDim.x / warpSize];
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
     p_pen2 = gp.l[19];
     p_pen3 = gp.l[20];
@@ -474,16 +501,17 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
     p_val8 = gp.l[33];
     p_val9 = gp.l[16];
     p_val10 = gp.l[17];
-    e_ang_l = 0.0;
-    e_coa_l = 0.0;
-    e_pen_l = 0.0;
-    rvec_MakeZero( f_j_l );
+    e_ang_ = 0.0;
+    e_coa_ = 0.0;
+    e_pen_ = 0.0;
+    CdDelta_j = 0.0;
+    rvec_MakeZero( f_j );
 
     type_j = my_atoms[j].type;
     start_j = Start_Index( j, &bond_list );
     end_j = End_Index( j, &bond_list );
-    p_val3 = sbp[ type_j ].p_val3;
-    p_val5 = sbp[ type_j ].p_val5;
+    p_val3 = sbp[type_j].p_val3;
+    p_val5 = sbp[type_j].p_val5;
 
     /* sum of pi and pi-pi BO terms for all neighbors of atom j,
      * used in determining the equilibrium angle between i-j-k */
@@ -507,8 +535,8 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
         t += warpSize;
     }
 
-    SBOp = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(SBOp);
-    prod_SBO = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Reduce(prod_SBO, Prod());
+    SBOp = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(SBOp);
+    prod_SBO = hipcub::WarpReduce<double>(temp_d[warp_id]).Reduce(prod_SBO, Prod());
 
     /* broadcast redux results from lane 0 */
     SBOp = __shfl(SBOp, 0 );
@@ -563,17 +591,28 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
         {
             i = pbond_ij->nbr;
             type_i = my_atoms[i].type;
+            Cdbo_ij = 0.0;
+            CdDelta_i = 0.0;
+            rvec_MakeZero( f_i );
 
             /* compute _ALL_ 3-body intrs */
             for ( itr = 0, pk = start_j + lane_id; itr < (end_j - start_j + warpSize - 1) / warpSize; ++itr )
             {
-                pbond_jk = &bond_list.bond_list[pk];
-                bo_jk = &pbond_jk->bo_data;
-                BOA_jk = bo_jk->BO - control->thb_cut;
+                if ( pk != pi && pk < end_j )
+                {
+                    pbond_jk = &bond_list.bond_list[pk];
+                    bo_jk = &pbond_jk->bo_data;
+                    BOA_jk = bo_jk->BO - control->thb_cut;
 
-                offset = (pk < end_j && pk != pi && BOA_jk >= 0.0) ? 1 : 0;
+                    offset = (BOA_jk >= 0.0) ? 1 : 0;
+                }
+                else
+                {
+                    offset = 0;
+                }
+
                 flag = (offset == 1) ? TRUE : FALSE;
-                hipcub::WarpScan<int>(temp_i[j % (blockDim.x / warpSize)]).ExclusiveSum(offset, offset);
+                hipcub::WarpScan<int>(temp_i[warp_id]).ExclusiveSum(offset, offset);
 
                 if ( flag == TRUE )
                 {
@@ -605,18 +644,17 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
                     if ( j < n && BOA_jk >= 0.0 && bo_ij->BO * bo_jk->BO >= 0.00001 )
 //                    if ( j < n && BOA_jk >= 0.0 && bo_ij->BO * bo_jk->BO >= SQR(control->thb_cut) )
                     {
-                        thbh = &d_thbh[
-                            index_thbp(type_i, type_j, type_k, num_atom_types) ];
+                        thbh_ijk = index_thbp(type_i, type_j, type_k, num_atom_types);
 
-                        for ( cnt = 0; cnt < thbh->cnt; ++cnt )
+                        for ( cnt = 0; cnt < thbh[thbh_ijk].cnt; ++cnt )
                         {
                             /* valence angle does not exist in the force field */
-                            if ( FABS(thbh->prm[cnt].p_val1) < 0.001 )
+                            if ( FABS(thbh[thbh_ijk].prm[cnt].p_val1) < 0.001 )
                             {
                                 continue;
                             }
 
-                            thbp = &thbh->prm[cnt];
+                            three_body_parameters const * const thbp = &thbh[thbh_ijk].prm[cnt];
 
                             /* calculate valence angle energy */
                             p_val1 = thbp->p_val1;
@@ -672,7 +710,7 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
 
                             if ( pk < pi )
                             {
-                                e_ang_l += f7_ij * f7_jk * f8_Dj * expval12theta;
+                                e_ang_ += f7_ij * f7_jk * f8_Dj * expval12theta;
                             }
 
                             /* calculate penalty for double bonds in valency angles */
@@ -691,7 +729,7 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
                             e_pen = p_pen1 * f9_Dj * exp_pen2ij * exp_pen2jk;
                             if ( pk < pi )
                             {
-                                e_pen_l += e_pen;
+                                e_pen_ += e_pen;
                             }
 
                             CEpen1 = e_pen * Cf9j / f9_Dj;
@@ -712,7 +750,7 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
 
                             if ( pk < pi )
                             {
-                                e_coa_l += e_coa;
+                                e_coa_ += e_coa;
                             }
 
                             CEcoa1 = -2.0 * p_coa4 * (BOA_ij - 1.5) * e_coa;
@@ -724,17 +762,17 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
                             /* calculate force contributions */
                             if ( pk < pi )
                             {
-#if !defined(CUDA_ACCUM_ATOMIC)
-                                bo_ij->Cdbo += CEval1 + CEpen2 + (CEcoa1 - CEcoa4);
-                                bo_jk->Cdbo += CEval2 + CEpen3 + (CEcoa2 - CEcoa5);
-                                workspace.CdDelta[j] += (CEval3 + CEval7) + CEpen1 + CEcoa3;
-                                pbond_ij->va_CdDelta += CEcoa4;
+                                Cdbo_ij += CEval1 + CEpen2 + (CEcoa1 - CEcoa4);
+#if !defined(HIP_ACCUM_ATOMIC)
+                                atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
+#else
+                                atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
+#endif
+                                CdDelta_j += (CEval3 + CEval7) + CEpen1 + CEcoa3;
+                                CdDelta_i += CEcoa4;
+#if !defined(HIP_ACCUM_ATOMIC)
                                 pbond_jk->va_CdDelta += CEcoa5;
 #else
-                                atomicAdd( &bo_ij->Cdbo, CEval1 + CEpen2 + (CEcoa1 - CEcoa4) );
-                                atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
-                                atomicAdd( &workspace.CdDelta[j], (CEval3 + CEval7) + CEpen1 + CEcoa3 );
-                                atomicAdd( &workspace.CdDelta[i], CEcoa4 );
                                 atomicAdd( &workspace.CdDelta[k], CEcoa5 );
 #endif
 
@@ -746,7 +784,7 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
                                     temp = CUBE( temp_bo_jt );
                                     pBOjt7 = temp * temp * temp_bo_jt;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                                     bo_jt->Cdbo += (CEval6 * pBOjt7);
                                     bo_jt->Cdbopi += CEval5;
                                     bo_jt->Cdbopi2 += CEval5;
@@ -757,13 +795,11 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
 #endif
                                 }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-                                rvec_ScaledAdd( pbond_ij->va_f, CEval8, p_ijk->dcos_di );
-                                rvec_ScaledAdd( f_j_l, CEval8, p_ijk->dcos_dj );
+                                rvec_ScaledAdd( f_i, CEval8, p_ijk->dcos_di );
+                                rvec_ScaledAdd( f_j, CEval8, p_ijk->dcos_dj );
+#if !defined(HIP_ACCUM_ATOMIC)
                                 rvec_ScaledAdd( pbond_jk->va_f, CEval8, p_ijk->dcos_dk );
 #else
-                                atomic_rvecScaledAdd( workspace.f[i], CEval8, p_ijk->dcos_di );
-                                rvec_ScaledAdd( f_j_l, CEval8, p_ijk->dcos_dj );
                                 atomic_rvecScaledAdd( workspace.f[k], CEval8, p_ijk->dcos_dk );
 #endif
                             }
@@ -774,9 +810,27 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
                 /* get num_thb_intrs from thread in last lane */
                 num_thb_intrs = num_thb_intrs + offset + (flag == TRUE ? 1 : 0);
                 num_thb_intrs = __shfl(num_thb_intrs, warpSize - 1 );
-//                __syncthreads();
 
                 pk += warpSize;
+            }
+
+            Cdbo_ij = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(Cdbo_ij);
+            CdDelta_i = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(CdDelta_i);
+            f_i[0] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_i[0]);
+            f_i[1] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_i[1]);
+            f_i[2] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_i[2]);
+
+            if ( lane_id == 0 )
+            {
+#if !defined(HIP_ACCUM_ATOMIC)
+                bo_ij->Cdbo += Cdbo_ij;
+                pbond_ij->va_CdDelta += CdDelta_i;
+                rvec_Add( pbond_ij->va_f, f_i );
+#else
+                atomicAdd( &bo_ij->Cdbo, Cdbo_ij );
+                atomicAdd( &workspace.CdDelta[i], CdDelta_i );
+                atomic_rvecAdd( workspace.f[i], f_i );
+#endif
             }
         }
 
@@ -786,25 +840,28 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
         }
     }
 
-    f_j_l[0] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_j_l[0]);
-    f_j_l[1] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_j_l[1]);
-    f_j_l[2] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_j_l[2]);
-    e_ang_l = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(e_ang_l);
-    e_coa_l = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(e_coa_l);
-    e_pen_l = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(e_pen_l);
+    CdDelta_j = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(CdDelta_j);
+    f_j[0] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_j[0]);
+    f_j[1] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_j[1]);
+    f_j[2] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_j[2]);
+    e_ang_ = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(e_ang_);
+    e_coa_ = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(e_coa_);
+    e_pen_ = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(e_pen_);
 
     if ( lane_id == 0 )
     {
-#if !defined(CUDA_ACCUM_ATOMIC)
-        rvec_Add( workspace.f[j], f_j_l );
-        e_ang_g[j] = e_ang_l;
-        e_coa_g[j] = e_coa_l;
-        e_pen_g[j] = e_pen_l;
+#if !defined(HIP_ACCUM_ATOMIC)
+        rvec_Add( workspace.f[j], f_j );
+        atomicAdd( &workspace.CdDelta[j], CdDelta_j );
+        e_ang_g[j] = e_ang_;
+        e_coa_g[j] = e_coa_;
+        e_pen_g[j] = e_pen_;
 #else
-        atomic_rvecAdd( workspace.f[j], f_j_l );
-        atomicAdd( (double *) e_ang_g, (double) e_ang_l );
-        atomicAdd( (double *) e_coa_g, (double) e_coa_l );
-        atomicAdd( (double *) e_pen_g, (double) e_pen_l );
+        atomic_rvecAdd( workspace.f[j], f_j );
+        atomicAdd( &workspace.CdDelta[j], CdDelta_j );
+        atomicAdd( (double *) e_ang_g, (double) e_ang_ );
+        atomicAdd( (double *) e_coa_g, (double) e_coa_ );
+        atomicAdd( (double *) e_pen_g, (double) e_pen_ );
 #endif
     }
 }
@@ -812,16 +869,18 @@ HIP_GLOBAL void k_valence_angles_part1_opt( reax_atom *my_atoms,
 
 /* Compute 3-body interactions, in which the main role is played by
    atom j, which sits in the middle of the other two atoms i and k. */
-HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
-        global_parameters gp, single_body_parameters *sbp, three_body_header *d_thbh,
-        control_params *control, storage workspace, reax_list bond_list,
+HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom const * const my_atoms,
+        global_parameters gp, single_body_parameters const * const sbp,
+        three_body_header const * const thbh, control_params const * const control,
+        storage workspace, reax_list bond_list,
         reax_list thb_list, int n, int N, int num_atom_types,
-        real *e_ang_g, real *e_pen_g, real *e_coa_g, rvec *ext_press_g )
+        real * const e_ang_g, real * const e_pen_g, real * const e_coa_g,
+        rvec * const ext_press_g )
 {
     int i, j, pi, k, pk, t;
     int type_i, type_j, type_k;
     int start_j, end_j;
-    int cnt, num_thb_intrs;
+    int cnt, num_thb_intrs, thbh_ijk;
     real temp, temp_bo_jt, pBOjt7;
     real p_val1, p_val2, p_val3, p_val4, p_val5;
     real p_val6, p_val7, p_val8, p_val9, p_val10;
@@ -832,15 +891,14 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
     real dSBO1, dSBO2, SBO, SBO2, CSBO2, SBOp, prod_SBO, vlpadj;
     real CEval1, CEval2, CEval3, CEval4, CEval5, CEval6, CEval7, CEval8;
     real CEpen1, CEpen2, CEpen3;
-    real e_ang_l, e_coa, e_coa_l, e_pen, e_pen_l;
+    real e_ang_, e_coa, e_coa_, e_pen, e_pen_;
     real CEcoa1, CEcoa2, CEcoa3, CEcoa4, CEcoa5;
     real Cf7ij, Cf7jk, Cf8j, Cf9j;
     real f7_ij, f7_jk, f8_Dj, f9_Dj;
     real Ctheta_0, theta_0, theta_00, theta, cos_theta, sin_theta;
     real BOA_ij, BOA_jk;
-    rvec rvec_temp, f_j_l, ext_press_l;
-    three_body_header *thbh;
-    three_body_parameters *thbp;
+    real Cdbo_ij, CdDelta_i, CdDelta_j;
+    rvec rvec_temp, f_i, f_j, ext_press;
     three_body_interaction_data *p_ijk;
     bond_data *pbond_ij, *pbond_jk, *pbond_jt;
     bond_order_data *bo_ij, *bo_jk, *bo_jt;
@@ -862,17 +920,18 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
     p_val8 = gp.l[33];
     p_val9 = gp.l[16];
     p_val10 = gp.l[17];
-    e_ang_l = 0.0;
-    e_coa_l = 0.0;
-    e_pen_l = 0.0;
-    rvec_MakeZero( f_j_l );
-    rvec_MakeZero( ext_press_l );
+    e_ang_ = 0.0;
+    e_coa_ = 0.0;
+    e_pen_ = 0.0;
+    CdDelta_j = 0.0;
+    rvec_MakeZero( f_j );
+    rvec_MakeZero( ext_press );
 
     type_j = my_atoms[j].type;
     start_j = Start_Index( j, &bond_list );
     end_j = End_Index( j, &bond_list );
-    p_val3 = sbp[ type_j ].p_val3;
-    p_val5 = sbp[ type_j ].p_val5;
+    p_val3 = sbp[type_j].p_val3;
+    p_val5 = sbp[type_j].p_val5;
 
     /* sum of pi and pi-pi BO terms for all neighbors of atom j,
      * used in determining the equilibrium angle between i-j-k */
@@ -940,6 +999,9 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
         {
             i = pbond_ij->nbr;
             type_i = my_atoms[i].type;
+            Cdbo_ij = 0.0;
+            CdDelta_i = 0.0;
+            rvec_MakeZero( f_i );
 
             /* compute _ALL_ 3-body intrs */
             for ( pk = start_j; pk < end_j; ++pk )
@@ -991,18 +1053,17 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
                     continue;
                 }
 
-                thbh = &d_thbh[
-                    index_thbp(type_i, type_j, type_k, num_atom_types) ];
+                thbh_ijk = index_thbp(type_i, type_j, type_k, num_atom_types);
 
-                for ( cnt = 0; cnt < thbh->cnt; ++cnt )
+                for ( cnt = 0; cnt < thbh[thbh_ijk].cnt; ++cnt )
                 {
                     /* valence angle does not exist in the force field */
-                    if ( FABS(thbh->prm[cnt].p_val1) < 0.001 )
+                    if ( FABS(thbh[thbh_ijk].prm[cnt].p_val1) < 0.001 )
                     {
                         continue;
                     }
 
-                    thbp = &thbh->prm[cnt];
+                    three_body_parameters const * const thbp = &thbh[thbh_ijk].prm[cnt];
 
                     /* calculate valence angle energy */
                     p_val1 = thbp->p_val1;
@@ -1058,7 +1119,7 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
 
                     if ( pk < pi )
                     {
-                        e_ang_l += f7_ij * f7_jk * f8_Dj * expval12theta;
+                        e_ang_ += f7_ij * f7_jk * f8_Dj * expval12theta;
                     }
 
                     /* calculate penalty for double bonds in valency angles */
@@ -1077,7 +1138,7 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
                     e_pen = p_pen1 * f9_Dj * exp_pen2ij * exp_pen2jk;
                     if ( pk < pi )
                     {
-                        e_pen_l += e_pen;
+                        e_pen_ += e_pen;
                     }
 
                     CEpen1 = e_pen * Cf9j / f9_Dj;
@@ -1098,7 +1159,7 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
 
                     if ( pk < pi )
                     {
-                        e_coa_l += e_coa;
+                        e_coa_ += e_coa;
                     }
 
                     CEcoa1 = -2.0 * p_coa4 * (BOA_ij - 1.5) * e_coa;
@@ -1110,17 +1171,17 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
                     /* calculate force contributions */
                     if ( pk < pi )
                     {
-#if !defined(CUDA_ACCUM_ATOMIC)
-                        bo_ij->Cdbo += CEval1 + CEpen2 + (CEcoa1 - CEcoa4);
-                        bo_jk->Cdbo += CEval2 + CEpen3 + (CEcoa2 - CEcoa5);
-                        workspace.CdDelta[j] += (CEval3 + CEval7) + CEpen1 + CEcoa3;
-                        pbond_ij->va_CdDelta += CEcoa4;
+                        Cdbo_ij += CEval1 + CEpen2 + (CEcoa1 - CEcoa4);
+#if !defined(HIP_ACCUM_ATOMIC)
+                        atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
+#else
+                        atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
+#endif
+                        CdDelta_j += (CEval3 + CEval7) + CEpen1 + CEcoa3;
+                        CdDelta_i += CEcoa4;
+#if !defined(HIP_ACCUM_ATOMIC)
                         pbond_jk->va_CdDelta += CEcoa5;
 #else
-                        atomicAdd( &bo_ij->Cdbo, CEval1 + CEpen2 + (CEcoa1 - CEcoa4) );
-                        atomicAdd( &bo_jk->Cdbo, CEval2 + CEpen3 + (CEcoa2 - CEcoa5) );
-                        atomicAdd( &workspace.CdDelta[j], (CEval3 + CEval7) + CEpen1 + CEcoa3 );
-                        atomicAdd( &workspace.CdDelta[i], CEcoa4 );
                         atomicAdd( &workspace.CdDelta[k], CEcoa5 );
 #endif
 
@@ -1132,7 +1193,7 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
                             temp = CUBE( temp_bo_jt );
                             pBOjt7 = temp * temp * temp_bo_jt;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                             bo_jt->Cdbo += (CEval6 * pBOjt7);
                             bo_jt->Cdbopi += CEval5;
                             bo_jt->Cdbopi2 += CEval5;
@@ -1143,60 +1204,60 @@ HIP_GLOBAL void k_valence_angles_virial_part1( reax_atom *my_atoms,
 #endif
                         }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
                         /* terms not related to bond order derivatives are
                          * added directly into forces and pressure vector/tensor */
                         rvec_Scale( rvec_temp, CEval8, p_ijk->dcos_di );
-                        rvec_Add( pbond_ij->va_f, rvec_temp );
+                        rvec_Add( f_i, rvec_temp );
                         rvec_iMultiply( rvec_temp, pbond_ij->rel_box, rvec_temp );
-                        rvec_Add( ext_press_l, rvec_temp );
+                        rvec_Add( ext_press, rvec_temp );
 
-                        rvec_ScaledAdd( f_j_l, CEval8, p_ijk->dcos_dj );
+                        rvec_ScaledAdd( f_j, CEval8, p_ijk->dcos_dj );
 
                         rvec_Scale( rvec_temp, CEval8, p_ijk->dcos_dk );
+#if !defined(HIP_ACCUM_ATOMIC)
                         rvec_Add( pbond_jk->va_f, rvec_temp );
-                        rvec_iMultiply( rvec_temp, pbond_jk->rel_box, rvec_temp );
-                        rvec_Add( ext_press_l, rvec_temp );
 #else
-                        /* terms not related to bond order derivatives are
-                         * added directly into forces and pressure vector/tensor */
-                        rvec_Scale( rvec_temp, CEval8, p_ijk->dcos_di );
-                        atomic_rvecAdd( workspace.f[i], rvec_temp );
-                        rvec_iMultiply( rvec_temp, pbond_ij->rel_box, rvec_temp );
-                        rvec_Add( ext_press_l, rvec_temp );
-
-                        rvec_ScaledAdd( f_j_l, CEval8, p_ijk->dcos_dj );
-
-                        rvec_Scale( rvec_temp, CEval8, p_ijk->dcos_dk );
                         atomic_rvecAdd( workspace.f[k], rvec_temp );
-                        rvec_iMultiply( rvec_temp, pbond_jk->rel_box, rvec_temp );
-                        rvec_Add( ext_press_l, rvec_temp );
 #endif
+                        rvec_iMultiply( rvec_temp, pbond_jk->rel_box, rvec_temp );
+                        rvec_Add( ext_press, rvec_temp );
                     }
                 }
             }
+
+#if !defined(HIP_ACCUM_ATOMIC)
+            bo_ij->Cdbo += Cdbo_ij;
+            pbond_ij->va_CdDelta += CdDelta_i;
+            rvec_Add( pbond_ij->va_f, f_i );
+#else
+            atomicAdd( &bo_ij->Cdbo, Cdbo_ij );
+            atomicAdd( &workspace.CdDelta[i], CdDelta_i );
+            atomic_rvecAdd( workspace.f[i], f_i );
+#endif
         }
 
         Set_End_Index( pi, num_thb_intrs, &thb_list );
     }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-    rvec_Add( workspace.f[j], f_j_l );
-    e_ang_g[j] = e_ang_l;
-    e_coa_g[j] = e_coa_l;
-    e_pen_g[j] = e_pen_l;
-    rvec_Copy( ext_press_g[j], ext_press_l );
+#if !defined(HIP_ACCUM_ATOMIC)
+    rvec_Add( workspace.f[j], f_j );
+    atomicAdd( &workspace.CdDelta[j], CdDelta_j );
+    e_ang_g[j] = e_ang_;
+    e_coa_g[j] = e_coa_;
+    e_pen_g[j] = e_pen_;
+    rvec_Copy( ext_press_g[j], ext_press );
 #else
-    atomic_rvecAdd( workspace.f[j], f_j_l );
-    atomicAdd( (double *) e_ang_g, (double) e_ang_l );
-    atomicAdd( (double *) e_coa_g, (double) e_coa_l );
-    atomicAdd( (double *) e_pen_g, (double) e_pen_l );
-    atomic_rvecAdd( *ext_press_g, ext_press_l );
+    atomic_rvecAdd( workspace.f[j], f_j );
+    atomicAdd( &workspace.CdDelta[j], CdDelta_j );
+    atomicAdd( (double *) e_ang_g, (double) e_ang_ );
+    atomicAdd( (double *) e_coa_g, (double) e_coa_ );
+    atomicAdd( (double *) e_pen_g, (double) e_pen_ );
+    atomic_rvecAdd( *ext_press_g, ext_press );
 #endif
 }
 
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
 HIP_GLOBAL void k_valence_angles_part2( reax_atom *atoms,
         control_params *control, storage workspace,
         reax_list bond_list, int N )
@@ -1218,7 +1279,6 @@ HIP_GLOBAL void k_valence_angles_part2( reax_atom *atoms,
         sym_index_bond = &bond_list.bond_list[ pbond->sym_index ];
 
         workspace.CdDelta[i] += sym_index_bond->va_CdDelta;
-
         rvec_Add( workspace.f[i], sym_index_bond->va_f );
     }
 }
@@ -1226,8 +1286,9 @@ HIP_GLOBAL void k_valence_angles_part2( reax_atom *atoms,
 
 
 /* Estimate the num. of three-body interactions */
-HIP_GLOBAL void k_estimate_valence_angles( reax_atom *my_atoms,
-        control_params *control, reax_list bond_list, int n, int N, int *count )
+HIP_GLOBAL void k_estimate_valence_angles( reax_atom const * const my_atoms,
+        control_params const * const control, reax_list bond_list,
+        int n, int N, int * const count )
 {
     int j, pi, pk, start_j, end_j, num_thb_intrs;
     real BOA_ij, BOA_jk;
@@ -1280,11 +1341,12 @@ HIP_GLOBAL void k_estimate_valence_angles( reax_atom *my_atoms,
 
 
 /* Estimate the num. of three-body interactions */
-HIP_GLOBAL void k_estimate_valence_angles_opt( reax_atom *my_atoms,
-        control_params *control, reax_list bond_list, int n, int N, int *count )
+HIP_GLOBAL void k_estimate_valence_angles_opt( reax_atom const * const my_atoms,
+        control_params const * const control, reax_list bond_list,
+        int n, int N, int * const count )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpReduce<int>::TempStorage, temp_i2)
-    int j, pi, pk, start_j, end_j, thread_id, lane_id, itr;
+    extern __shared__ hipcub::WarpReduce<int>::TempStorage temp_i2[];
+    int j, pi, pk, start_j, end_j, thread_id, warp_id, lane_id, itr;
     int num_thb_intrs;
     real BOA_ij, BOA_jk;
     bond_data *pbond_ij, *pbond_jk;
@@ -1300,6 +1362,7 @@ HIP_GLOBAL void k_estimate_valence_angles_opt( reax_atom *my_atoms,
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
     start_j = Start_Index( j, &bond_list );
     end_j = End_Index( j, &bond_list );
@@ -1316,19 +1379,22 @@ HIP_GLOBAL void k_estimate_valence_angles_opt( reax_atom *my_atoms,
         {
             for ( itr = 0, pk = start_j + lane_id; itr < (end_j - start_j + warpSize - 1) / warpSize; ++itr )
             {
-                pbond_jk = &bond_list.bond_list[pk];
-                bo_jk = &pbond_jk->bo_data;
-                BOA_jk = bo_jk->BO - control->thb_cut;
-
-                if ( BOA_jk >= 0.0 )
+                if ( pk < end_j )
                 {
-                    ++num_thb_intrs;
+                    pbond_jk = &bond_list.bond_list[pk];
+                    bo_jk = &pbond_jk->bo_data;
+                    BOA_jk = bo_jk->BO - control->thb_cut;
+
+                    if ( BOA_jk >= 0.0 )
+                    {
+                        ++num_thb_intrs;
+                    }
                 }
 
                 pk += warpSize;
             }
 
-            num_thb_intrs = hipcub::WarpReduce<int>(temp_i2[j % (blockDim.x / warpSize)]).Sum(num_thb_intrs);
+            num_thb_intrs = hipcub::WarpReduce<int>(temp_i2[warp_id]).Sum(num_thb_intrs);
         }
 
         if ( lane_id == 0 )
@@ -1339,17 +1405,18 @@ HIP_GLOBAL void k_estimate_valence_angles_opt( reax_atom *my_atoms,
 }
 
 
-static int Hip_Estimate_Storage_Three_Body( reax_system *system, control_params *control,
-        simulation_data *data, storage *workspace, reax_list **lists, int *thbody )
+static int Hip_Estimate_Storage_Three_Body( reax_system * const system,
+        control_params const * const control, simulation_data * const data,
+        storage * const workspace, reax_list **lists, int * const thbody )
 {
     int blocks, ret;
 
     ret = SUCCESS;
 
-    hip_memset( thbody, 0, system->total_bonds * sizeof(int),
-            "Hip_Estimate_Storage_Three_Body::thbody" );
+    sHipMemsetAsync( thbody, 0, sizeof(int) * system->total_bonds,
+            control->streams[0], __FILE__, __LINE__ );
 
-//    k_estimate_valence_angles <<< control->blocks_n, control->block_size_n >>>
+//    k_estimate_valence_angles <<< control->blocks_n, control->block_size_n, 0, control->streams[0] >>>
 //        ( system->d_my_atoms, (control_params *)control->d_control_params, 
 //          *(lists[BONDS]), system->n, system->N, thbody );
 //    hipCheckError( );
@@ -1357,14 +1424,19 @@ static int Hip_Estimate_Storage_Three_Body( reax_system *system, control_params 
     blocks = system->N * warpSize / DEF_BLOCK_SIZE
         + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-    hipLaunchKernelGGL(k_estimate_valence_angles_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpReduce<int>::TempStorage) * (DEF_BLOCK_SIZE / 64)  , 0,  system->d_my_atoms, (control_params *)control->d_control_params,
+    k_estimate_valence_angles_opt <<< blocks, DEF_BLOCK_SIZE,
+                              sizeof(hipcub::WarpReduce<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                              control->streams[0] >>>
+        ( system->d_my_atoms, (control_params *)control->d_control_params,
           *(lists[BONDS]), system->n, system->N, thbody );
     hipCheckError( );
 
-    Hip_Reduction_Sum( thbody, system->d_total_thbodies, system->total_bonds );
+    Hip_Reduction_Sum( thbody, system->d_total_thbodies, system->total_bonds,
+           0, control->streams[0] );
 
-    sHipMemcpy( &system->total_thbodies, system->d_total_thbodies,
-            sizeof(int), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &system->total_thbodies, system->d_total_thbodies,
+            sizeof(int), hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
     if ( data->step - data->prev_steps == 0 )
     {
@@ -1401,41 +1473,43 @@ static int Hip_Estimate_Storage_Three_Body( reax_system *system, control_params 
  *
  * indices: list indices
  * entries: num. of entries in list */
-void Hip_Init_Three_Body_Indices( int *indices, int entries, reax_list **lists )
+static void Hip_Init_Three_Body_Indices( control_params const * const control,
+        int * const indices, int entries, reax_list **lists )
 {
     reax_list *thbody;
 
     thbody = lists[THREE_BODIES];
 
-    Hip_Scan_Excl_Sum( indices, thbody->index, entries );
+    Hip_Scan_Excl_Sum( indices, thbody->index, entries, 0, control->streams[0] );
 }
 
 
-int Hip_Compute_Valence_Angles( reax_system *system, control_params *control,
-        simulation_data *data, storage *workspace, 
-        reax_list **lists, output_controls *out_control )
+int Hip_Compute_Valence_Angles( reax_system * const system,
+        control_params const * const control,
+        simulation_data * const data, storage * const workspace,
+        reax_list **lists, output_controls const * const out_control )
 {
     int ret, *thbody, blocks;
     size_t s;
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     int update_energy;
     real *spad;
     rvec *rvec_spad;
 #endif
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     s = MAX( sizeof(int) * system->total_bonds,
             (sizeof(real) * 3 + sizeof(rvec)) * system->N + sizeof(rvec) * control->blocks_n ),
 #else
     s = sizeof(int) * system->total_bonds;
 #endif
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            s, "Hip_Compute_Valence_Angles::workspace->scratch" );
+    sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+            s, __FILE__, __LINE__ );
 
-    thbody = (int *) workspace->scratch;
-#if !defined(CUDA_ACCUM_ATOMIC)
-    spad = (real *) workspace->scratch;
+    thbody = (int *) workspace->scratch[0];
+#if !defined(HIP_ACCUM_ATOMIC)
+    spad = (real *) workspace->scratch[0];
     update_energy = (out_control->energy_update_freq > 0
             && data->step % out_control->energy_update_freq == 0) ? TRUE : FALSE;
 #endif
@@ -1445,27 +1519,29 @@ int Hip_Compute_Valence_Angles( reax_system *system, control_params *control,
 
     if ( ret == SUCCESS )
     {
-        Hip_Init_Three_Body_Indices( thbody, system->total_thbodies_indices, lists );
+        Hip_Init_Three_Body_Indices( control, thbody, system->total_thbodies_indices, lists );
 
-#if defined(CUDA_ACCUM_ATOMIC)
-        hip_memset( &((simulation_data *)data->d_simulation_data)->my_en.e_ang,
-                0, sizeof(real), "Hip_Compute_Valence_Angles::e_ang" );
-        hip_memset( &((simulation_data *)data->d_simulation_data)->my_en.e_pen,
-                0, sizeof(real), "Hip_Compute_Valence_Angles::e_pen" );
-        hip_memset( &((simulation_data *)data->d_simulation_data)->my_en.e_coa,
-                0, sizeof(real), "Hip_Compute_Valence_Angles::e_coa" );
-        hip_memset( &((simulation_data *)data->d_simulation_data)->my_ext_press,
-                0, sizeof(rvec), "Hip_Compute_Valence_Angles::my_ext_press" );
+#if defined(HIP_ACCUM_ATOMIC)
+        sHipMemsetAsync( &((simulation_data *)data->d_simulation_data)->my_en.e_ang,
+                0, sizeof(real), control->streams[0], __FILE__, __LINE__ );
+        sHipMemsetAsync( &((simulation_data *)data->d_simulation_data)->my_en.e_pen,
+                0, sizeof(real), control->streams[0], __FILE__, __LINE__ );
+        sHipMemsetAsync( &((simulation_data *)data->d_simulation_data)->my_en.e_coa,
+                0, sizeof(real), control->streams[0], __FILE__, __LINE__ );
+        sHipMemsetAsync( &((simulation_data *)data->d_simulation_data)->my_ext_press,
+                0, sizeof(rvec), control->streams[0], __FILE__, __LINE__ );
 #endif
 
         if ( control->virial == 1 )
         {
-            hipLaunchKernelGGL(k_valence_angles_virial_part1, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  system->d_my_atoms, system->reax_param.d_gp,
+            k_valence_angles_virial_part1 <<< control->blocks_n, control->block_size_n,
+                                          0, control->streams[0] >>>
+                ( system->d_my_atoms, system->reax_param.d_gp,
                   system->reax_param.d_sbp, system->reax_param.d_thbp, 
                   (control_params *) control->d_control_params,
                   *(workspace->d_workspace), *(lists[BONDS]), *(lists[THREE_BODIES]),
                   system->n, system->N, system->reax_param.num_atom_types, 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                   spad, &spad[system->N], &spad[2 * system->N], (rvec *) (&spad[3 * system->N])
 #else
                   &((simulation_data *)data->d_simulation_data)->my_en.e_ang,
@@ -1477,13 +1553,14 @@ int Hip_Compute_Valence_Angles( reax_system *system, control_params *control,
         }
         else
         {
-//            k_valence_angles_part1 <<< control->blocks_n, control->block_size_n >>>
+//            k_valence_angles_part1 <<< control->blocks_n, control->block_size_n,
+//                                   0, control->streams[0] >>>
 //                ( system->d_my_atoms, system->reax_param.d_gp,
 //                  system->reax_param.d_sbp, system->reax_param.d_thbp, 
 //                  (control_params *) control->d_control_params,
 //                  *(workspace->d_workspace), *(lists[BONDS]), *(lists[THREE_BODIES]),
 //                  system->n, system->N, system->reax_param.num_atom_types, 
-//#if !defined(CUDA_ACCUM_ATOMIC)
+//#if !defined(HIP_ACCUM_ATOMIC)
 //                  spad, &spad[system->N], &spad[2 * system->N]
 //#else
 //                  &((simulation_data *)data->d_simulation_data)->my_en.e_ang,
@@ -1497,13 +1574,14 @@ int Hip_Compute_Valence_Angles( reax_system *system, control_params *control,
 
             k_valence_angles_part1_opt <<< blocks, DEF_BLOCK_SIZE,
                                        (sizeof(hipcub::WarpScan<int>::TempStorage)
-                                        + sizeof(hipcub::WarpReduce<double>::TempStorage)) * (DEF_BLOCK_SIZE / warpSize) >>>
+                                        + sizeof(hipcub::WarpReduce<double>::TempStorage)) * (DEF_BLOCK_SIZE / warpSize),
+                                       control->streams[0] >>>
                 ( system->d_my_atoms, system->reax_param.d_gp,
                   system->reax_param.d_sbp, system->reax_param.d_thbp, 
                   (control_params *) control->d_control_params,
                   *(workspace->d_workspace), *(lists[BONDS]), *(lists[THREE_BODIES]),
                   system->n, system->N, system->reax_param.num_atom_types, 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                   spad, &spad[system->N], &spad[2 * system->N]
 #else
                   &((simulation_data *)data->d_simulation_data)->my_en.e_ang,
@@ -1514,42 +1592,47 @@ int Hip_Compute_Valence_Angles( reax_system *system, control_params *control,
         }
         hipCheckError( );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         if ( update_energy == TRUE )
         {
             Hip_Reduction_Sum( spad,
                     &((simulation_data *)data->d_simulation_data)->my_en.e_ang,
-                    system->N );
+                    system->N, 0, control->streams[0] );
 
             Hip_Reduction_Sum( &spad[system->N],
                     &((simulation_data *)data->d_simulation_data)->my_en.e_pen,
-                    system->N );
+                    system->N, 0, control->streams[0] );
 
             Hip_Reduction_Sum( &spad[2 * system->N],
                     &((simulation_data *)data->d_simulation_data)->my_en.e_coa,
-                    system->N );
+                    system->N, 0, control->streams[0] );
         }
 
         if ( control->virial == 1 )
         {
             rvec_spad = (rvec *) (&spad[3 * system->N]);
 
-            hipLaunchKernelGGL(k_reduction_rvec, dim3(control->blocks_n), dim3(control->block_size_n), sizeof(rvec) * (control->block_size_n / 64) , 0,  rvec_spad, &rvec_spad[system->N], system->N );
+            k_reduction_rvec <<< control->blocks_n, control->block_size_n,
+                             sizeof(rvec) * (control->block_size_n / warpSize),
+                             control->streams[0] >>>
+                ( rvec_spad, &rvec_spad[system->N], system->N );
             hipCheckError( );
 
-            hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(control->blocks_pow_2_n), sizeof(rvec) * (control->blocks_pow_2_n / 64) , 0,  &rvec_spad[system->N],
+            k_reduction_rvec <<< 1, control->blocks_pow_2_n,
+                             sizeof(rvec) * (control->blocks_pow_2_n / warpSize),
+                             control->streams[0] >>>
+                ( &rvec_spad[system->N],
                   &((simulation_data *)data->d_simulation_data)->my_ext_press,
                   control->blocks_n );
             hipCheckError( );
 //            Hip_Reduction_Sum( rvec_spad,
 //                    &((simulation_data *)data->d_simulation_data)->my_ext_press,
-//                    system->N );
+//                    system->N, control->streams[0] );
         }
-#endif
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-        hipLaunchKernelGGL(k_valence_angles_part2, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  system->d_my_atoms, (control_params *) control->d_control_params,
-              *(workspace->d_workspace), *(lists[BONDS]), system->N );
+        k_valence_angles_part2 <<< control->blocks_n, control->block_size_n,
+                               0, control->streams[0] >>>
+            ( *(workspace->d_workspace), *(lists[BONDS]), system->N );
         hipCheckError( );
 #endif
     }

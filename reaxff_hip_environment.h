@@ -1,22 +1,26 @@
 
-#ifndef __CUDA_ENVIRONMENT_H__
-#define __CUDA_ENVIRONMENT_H__
+#ifndef __HIP_ENVIRONMENT_H__
+#define __HIP_ENVIRONMENT_H__
 
-#if defined(PURE_REAX)
-    #include "../reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
+
 
 #ifdef __cplusplus
 extern "C"  {
 #endif
 
-void Hip_Setup_Environment( int, int, int );
+void Hip_Setup_Environment( reax_system const * const,
+        control_params * const );
 
 void Hip_Init_Block_Sizes( reax_system *, control_params * );
 
-void Hip_Cleanup_Environment( );
+void Hip_Cleanup_Environment( control_params const * const );
+
+void Hip_Print_Mem_Usage( simulation_data const * const );
 
 #ifdef __cplusplus
 }

@@ -19,13 +19,13 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_BOX_H__
-#define __CUDA_BOX_H__
+#ifndef __HIP_BOX_H__
+#define __HIP_BOX_H__
 
-#if defined(PURE_REAX)
-    #include "../reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
 
 

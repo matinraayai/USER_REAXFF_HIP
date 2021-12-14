@@ -23,7 +23,7 @@
 #define __HIP_VALENCE_ANGLES_H_
 
 #if defined(LAMMPS_REAX)
-    #include "reaxff_types.h"
+    #include "reaxff_reax_types.h"
 
     #include "reaxff_vector.h"
 #else

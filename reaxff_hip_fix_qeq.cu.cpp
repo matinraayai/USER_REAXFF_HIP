@@ -353,8 +353,7 @@ void  Hip_Copy_To_Device_Comm_Fix(double *buf,double *x,int nn,int offset)
 {
 
 	double *dev_buf;
-	hip_malloc( (void **) &dev_buf, sizeof(double)*nn, TRUE,
-			"Hip_Allocate_Matrix::start");
+  sHipMalloc((void **) &dev_buf, sizeof(double)*nn, __FILE__, __LINE__);
 	sHipMemcpy(buf,dev_buf,sizeof(double)*nn,hipMemcpyHostToDevice, __FILE__, __LINE__);
 
 
@@ -364,7 +363,7 @@ void  Hip_Copy_To_Device_Comm_Fix(double *buf,double *x,int nn,int offset)
 			+ (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 	//printf("Blocks %d \n",blocks);
 
-	hipLaunchKernelGGL(k_update_buf, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, dev_buf,x,nn, offset);
+	hipLaunchKernelGGL(k_update_buf, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, dev_buf, x, nn, offset);
 	hipDeviceSynchronize();
 
 	hipFree(dev_buf);

@@ -1,14 +1,25 @@
+
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_reset_tools.h"
+
+    #include "reaxff_hip_list.h"
+    #include "reaxff_hip_utils.h"
+    #include "reaxff_hip_reduction.h"
+
+    #include "reaxff_reset_tools.h"
+    #include "reaxff_vector.h"
+#else
+    #include "hip_reset_tools.h"
+
+    #include "hip_list.h"
+    #include "hip_utils.h"
+    #include "hip_reduction.h"
+
+    #include "../reset_tools.h"
+    #include "../vector.h"
+#endif
+
 #include "hip/hip_runtime.h"
-
-#include "reaxff_hip_reset_tools.h"
-
-#include "reaxff_hip_list.h"
-#include "reaxff_hip_utils.h"
-#include "reaxff_hip_reduction.h"
-
-#include "reaxff_reset_tools.h"
-#include "reaxff_vector.h"
-
 
 HIP_GLOBAL void k_reset_workspace( storage workspace, int N )
 {
@@ -43,7 +54,7 @@ HIP_GLOBAL void k_reset_hindex( reax_atom *my_atoms, single_body_parameters *sbp
     if ( sbp[ my_atoms[i].type ].p_hbond == H_ATOM
             || sbp[ my_atoms[i].type ].p_hbond == H_BONDING_ATOM )
     {
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         hindex[i] = 1;
     }
     else
@@ -56,14 +67,16 @@ HIP_GLOBAL void k_reset_hindex( reax_atom *my_atoms, single_body_parameters *sbp
 #endif
 }
 
-void Hip_Reset_Workspace( reax_system *system, storage *workspace )
+void Hip_Reset_Workspace( reax_system *system, control_params *control,
+        storage *workspace )
 {
     int blocks;
 
     blocks = system->total_cap / DEF_BLOCK_SIZE
         + ((system->total_cap % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_reset_workspace, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  *(workspace->d_workspace), system->total_cap );
+    k_reset_workspace <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( *(workspace->d_workspace), system->total_cap );
     hipCheckError( );
 }
 
@@ -71,17 +84,21 @@ void Hip_Reset_Workspace( reax_system *system, storage *workspace )
 void Hip_Reset_Atoms_HBond_Indices( reax_system* system, control_params *control,
         storage *workspace )
 {
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     int *hindex;
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(int) * system->total_cap,
-            "Hip_Reset_Atoms_HBond_Indices::workspace->scratch" );
-    hindex = (int *) workspace->scratch;
+    sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+            sizeof(int) * system->total_cap, __FILE__, __LINE__ );
+    hindex = (int *) workspace->scratch[0];
+#else
+    sHipMemsetAsync( system->d_numH, 0, sizeof(int),
+            control->streams[0], __FILE__, __LINE__ );
 #endif
 
-    hipLaunchKernelGGL(k_reset_hindex, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, 
-#if !defined(CUDA_ACCUM_ATOMIC)
+    k_reset_hindex <<< control->blocks_n, control->block_size_n, 0,
+                   control->streams[0] >>>
+        ( system->d_my_atoms, system->reax_param.d_sbp,
+#if !defined(HIP_ACCUM_ATOMIC)
           hindex, 
 #else
           system->d_numH,
@@ -89,12 +106,14 @@ void Hip_Reset_Atoms_HBond_Indices( reax_system* system, control_params *control
           system->total_cap );
     hipCheckError( );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-    Hip_Reduction_Sum( hindex, system->d_numH, system->N );
+#if !defined(HIP_ACCUM_ATOMIC)
+    Hip_Reduction_Sum( hindex, system->d_numH, system->N, 0, control->streams[0] );
 #endif
 
-    sHipMemcpy( &system->numH, system->d_numH, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &system->numH, system->d_numH, sizeof(int),
+            hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+
+    hipStreamSynchronize( control->streams[0] );
 }
 
 
@@ -110,5 +129,5 @@ extern "C" void Hip_Reset( reax_system *system, control_params *control,
         Reset_Pressures( data );
     }
 
-    Hip_Reset_Workspace( system, workspace );
+    Hip_Reset_Workspace( system, control, workspace );
 }

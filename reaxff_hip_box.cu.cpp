@@ -19,16 +19,7 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#if defined(PURE_REAX)
-    #include "hip_box.h"
-
-    #include "hip_integrate.h"
-    #include "hip_system_props.h"
-    #include "hip_utils.h"
-
-    #include "../box.h"
-    #include "../comm_tools.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_box.h"
 
     #include "reaxff_hip_integrate.h"
@@ -37,6 +28,15 @@
 
     #include "reaxff_box.h"
     #include "reaxff_comm_tools.h"
+#else
+    #include "hip_box.h"
+
+    #include "hip_integrate.h"
+    #include "hip_system_props.h"
+    #include "hip_utils.h"
+
+    #include "../box.h"
+    #include "../comm_tools.h"
 #endif
 
 
@@ -98,7 +98,7 @@ void Hip_Scale_Box( reax_system *system, control_params *control,
     lambda = SQRT( lambda );
 
     /* Scale velocities and positions at t+dt */
-    Hip_Scale_Velocities_NPT( system, lambda, mu );
+    Hip_Scale_Velocities_NPT( system, control, lambda, mu );
 
     Hip_Compute_Kinetic_Energy( system, control, workspace, data, mpi_data->comm_mesh3D );
 
@@ -112,10 +112,11 @@ void Hip_Scale_Box( reax_system *system, control_params *control,
     Setup_My_Ext_Box( system, control );
     Update_Comm( system );
 
-    sHipMemcpy( &system->d_big_box, &system->big_box,
-            sizeof(simulation_box), hipMemcpyHostToDevice, __FILE__, __LINE__ );
-    sHipMemcpy( &system->d_my_box, &system->my_box,
-            sizeof(simulation_box), hipMemcpyHostToDevice, __FILE__, __LINE__ );
-    sHipMemcpy( &system->d_my_ext_box, &system->my_ext_box,
-            sizeof(simulation_box), hipMemcpyHostToDevice, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &system->d_big_box, &system->big_box, sizeof(simulation_box),
+           hipMemcpyHostToDevice, control->streams[0], __FILE__, __LINE__ );
+    sHipMemcpyAsync( &system->d_my_box, &system->my_box, sizeof(simulation_box),
+           hipMemcpyHostToDevice, control->streams[0], __FILE__, __LINE__ );
+    sHipMemcpyAsync( &system->d_my_ext_box, &system->my_ext_box, sizeof(simulation_box),
+           hipMemcpyHostToDevice, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 }

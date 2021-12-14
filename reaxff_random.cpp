@@ -18,8 +18,11 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
-
-#include "reaxff_random.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_random.h"
+#else
+    #include "random.h"
+#endif
 
 #include <stdlib.h>
 #include <time.h>

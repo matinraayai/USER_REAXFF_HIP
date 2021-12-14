@@ -19,10 +19,9 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
 
 #if defined(PURE_REAX)
@@ -31,18 +30,16 @@
   #include "comm_tools.h"
   #include "tool_box.h"
   #include "vector.h"
-  #if defined(HAVE_HIP)
-    #include "hip_copy.h"
-  #endif
 #elif defined(LAMMPS_REAX)
   #include "reaxff_system_props.h"
 
   #include "reaxff_comm_tools.h"
   #include "reaxff_tool_box.h"
   #include "reaxff_vector.h"
-  #if defined(HAVE_HIP)
-    #include "reaxff_hip_copy.h"
-  #endif
+#endif
+
+#if defined(HAVE_HIP)
+  #include "hip/hip_copy.h"
 #endif
 
 
@@ -110,8 +107,8 @@ void Compute_Kinetic_Energy( reax_system* system, simulation_data* data,
 }
 
 
-void Compute_Total_Energy( reax_system *system, simulation_data *data,
-        MPI_Comm comm )
+void Compute_Total_Energy( reax_system const * const system,
+        control_params const * const control, simulation_data * const data, MPI_Comm comm )
 {
     int ret;
     real my_en[14], sys_en[14];
@@ -120,8 +117,8 @@ void Compute_Total_Energy( reax_system *system, simulation_data *data,
     my_en[13] = data->my_en.e_kin;
 
 #if defined(HAVE_HIP)
-    Hip_Copy_Simulation_Data_Device_to_Host( data,
-            (simulation_data *)data->d_simulation_data );
+    Hip_Copy_Simulation_Data_Device_to_Host( control, data,
+            (simulation_data *) data->d_simulation_data );
 #endif
 
     my_en[0] = data->my_en.e_bond;

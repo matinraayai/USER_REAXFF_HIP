@@ -1,4 +1,3 @@
-#include "hip/hip_runtime.h"
 /*----------------------------------------------------------------------
   PuReMD - Purdue ReaxFF Molecular Dynamics Program
 
@@ -19,51 +18,53 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
-#if defined(PURE_REAX)
-    #include "hip_hydrogen_bonds.h"
-
-    #include "hip_valence_angles.h"
-    #include "hip_helpers.h"
-    #include "hip_list.h"
-    #include "hip_reduction.h"
-    #include "hip_utils.h"
-
-    #include "../index_utils.h"
-    #include "../vector.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_hydrogen_bonds.h"
-
+    
     #include "reaxff_hip_valence_angles.h"
     #include "reaxff_hip_helpers.h"
     #include "reaxff_hip_list.h"
     #include "reaxff_hip_reduction.h"
     #include "reaxff_hip_utils.h"
-
+    
     #include "reaxff_index_utils.h"
     #include "reaxff_vector.h"
+    
+    #include "reaxff_hip_hydrogen_bonds.h"
+#else
+    #include "hip_valence_angles.h"
+    #include "hip_helpers.h"
+    #include "hip_list.h"
+    #include "hip_reduction.h"
+    #include "hip_utils.h"
+    
+    #include "../index_utils.h"
+    #include "../vector.h"
+    
+    #include "hip_hydrogen_bonds.h"
 #endif
+#include "hip/hip_runtime.h"
 #include <hipcub/hipcub.hpp>
 
 
 /* one thread per atom implementation */
-HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom *my_atoms, single_body_parameters *sbp,
-        hbond_parameters *d_hbp, global_parameters gp,
-        control_params *control, storage workspace,
+HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom const * const my_atoms,
+        single_body_parameters const * const sbp, hbond_parameters const * const hbp,
+        global_parameters gp, control_params const * const control, storage workspace,
         reax_list far_nbr_list, reax_list bond_list, reax_list hbond_list, int n, 
-        int num_atom_types, real *e_hb_g )
+        int num_atom_types, real * const e_hb_g )
 {
     int i, j, k, pi, pk;
     int type_i, type_j, type_k;
     int start_j, end_j, hb_start_j, hb_end_j;
     int *hblist, hblist_size;
     int itr, top;
-    int nbr_jk;
+    int nbr_jk, hbp_ijk;
     real r_ij, r_jk, theta, cos_theta, sin_xhz4, cos_xhz1, sin_theta2;
-    real e_hb, e_hb_l, exp_hb2, exp_hb3, CEhb1, CEhb2, CEhb3;
+    real e_hb, e_hb_, exp_hb2, exp_hb3, CEhb1, CEhb2, CEhb3;
     rvec dcos_theta_di, dcos_theta_dj, dcos_theta_dk;
     rvec dvec_jk;
-    rvec f_j_l, f_k_l;
-    hbond_parameters *hbp;
+    rvec f_j, f_k;
     bond_order_data *bo_ij;
     bond_data *pbond_ij;
     hbond_data *phbond_jk;
@@ -92,8 +93,8 @@ HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom *my_atoms, single_body_paramet
         hb_start_j = Start_Index( my_atoms[j].Hindex, &hbond_list );
         hb_end_j = End_Index( my_atoms[j].Hindex, &hbond_list );
         top = 0;
-        e_hb_l = 0.0;
-        rvec_MakeZero( f_j_l );
+        e_hb_ = 0.0;
+        rvec_MakeZero( f_j );
 
         if ( Num_Entries( j, &bond_list ) > hblist_size )
         {
@@ -126,7 +127,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom *my_atoms, single_body_paramet
             nbr_jk = phbond_jk->ptr;
             r_jk = far_nbr_list.far_nbr_list.d[nbr_jk];
 
-            rvec_MakeZero( f_k_l );
+            rvec_MakeZero( f_k );
 
             rvec_Scale( dvec_jk, hbond_list.hbond_list[pk].scl,
                     far_nbr_list.far_nbr_list.dvec[nbr_jk] );
@@ -143,7 +144,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom *my_atoms, single_body_paramet
                     bo_ij = &pbond_ij->bo_data;
                     type_i = my_atoms[i].type;
                     r_ij = pbond_ij->d;
-                    hbp = &d_hbp[ index_hbp(type_i, type_j, type_k, num_atom_types) ];
+                    hbp_ijk = index_hbp(type_i, type_j, type_k, num_atom_types);
 
                     Calculate_Theta( pbond_ij->dvec, r_ij, dvec_jk, r_jk,
                             &theta, &cos_theta );
@@ -157,41 +158,41 @@ HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom *my_atoms, single_body_paramet
                     sin_xhz4 = SQR( sin_theta2 );
                     sin_xhz4 *= sin_xhz4;
                     cos_xhz1 = ( 1.0 - cos_theta );
-                    exp_hb2 = EXP( -1.0 * hbp->p_hb2 * bo_ij->BO );
-                    exp_hb3 = EXP( -1.0 * hbp->p_hb3 * ( hbp->r0_hb / r_jk
-                                + r_jk / hbp->r0_hb - 2.0 ) );
+                    exp_hb2 = EXP( -1.0 * hbp[hbp_ijk].p_hb2 * bo_ij->BO );
+                    exp_hb3 = EXP( -1.0 * hbp[hbp_ijk].p_hb3 * ( hbp[hbp_ijk].r0_hb / r_jk
+                                + r_jk / hbp[hbp_ijk].r0_hb - 2.0 ) );
 
-                    e_hb = hbp->p_hb1 * (1.0 - exp_hb2) * exp_hb3 * sin_xhz4;
-                    e_hb_l += e_hb;
+                    e_hb = hbp[hbp_ijk].p_hb1 * (1.0 - exp_hb2) * exp_hb3 * sin_xhz4;
+                    e_hb_ += e_hb;
 
-                    CEhb1 = hbp->p_hb1 * hbp->p_hb2 * exp_hb2 * exp_hb3 * sin_xhz4;
-                    CEhb2 = -0.5 * hbp->p_hb1 * (1.0 - exp_hb2) * exp_hb3 * cos_xhz1;
-                    CEhb3 = hbp->p_hb3 * e_hb * (hbp->r0_hb / SQR( r_jk )
-                            + -1.0 / hbp->r0_hb);
+                    CEhb1 = hbp[hbp_ijk].p_hb1 * hbp[hbp_ijk].p_hb2 * exp_hb2 * exp_hb3 * sin_xhz4;
+                    CEhb2 = -0.5 * hbp[hbp_ijk].p_hb1 * (1.0 - exp_hb2) * exp_hb3 * cos_xhz1;
+                    CEhb3 = hbp[hbp_ijk].p_hb3 * e_hb * (hbp[hbp_ijk].r0_hb / SQR( r_jk )
+                            + -1.0 / hbp[hbp_ijk].r0_hb);
 
                     /* hydrogen bond forces */
                     /* dbo term */
-                    bo_ij->Cdbo += CEhb1;
+                    atomicAdd( &bo_ij->Cdbo, CEhb1 );
 
                     /* dcos terms */
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     rvec_ScaledAdd( pbond_ij->hb_f, CEhb2, dcos_theta_di ); 
 #else
                     atomic_rvecScaledAdd( workspace.f[i], CEhb2, dcos_theta_di );
 #endif
-                    rvec_ScaledAdd( f_j_l, CEhb2, dcos_theta_dj );
-                    rvec_ScaledAdd( f_k_l, CEhb2, dcos_theta_dk );
+                    rvec_ScaledAdd( f_j, CEhb2, dcos_theta_dj );
+                    rvec_ScaledAdd( f_k, CEhb2, dcos_theta_dk );
 
                     /* dr terms */
-                    rvec_ScaledAdd( f_j_l, -1.0 * CEhb3 / r_jk, dvec_jk ); 
-                    rvec_ScaledAdd( f_k_l, CEhb3 / r_jk, dvec_jk );
+                    rvec_ScaledAdd( f_j, -1.0 * CEhb3 / r_jk, dvec_jk ); 
+                    rvec_ScaledAdd( f_k, CEhb3 / r_jk, dvec_jk );
                 }
             }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-            rvec_Copy( phbond_jk->hb_f, f_k_l );
+#if !defined(HIP_ACCUM_ATOMIC)
+            rvec_Copy( phbond_jk->hb_f, f_k );
 #else
-            atomic_rvecAdd( workspace.f[k], f_k_l );
+            atomic_rvecAdd( workspace.f[k], f_k );
 #endif
         }
 
@@ -200,36 +201,34 @@ HIP_GLOBAL void k_hydrogen_bonds_part1( reax_atom *my_atoms, single_body_paramet
             free( hblist );
         }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-        /* write conflicts for accumulating partial forces resolved by subsequent kernels */
-        rvecCopy( workspace.f[j], f_j_l );
-        e_hb_g[j] = e_hb_l;
+#if !defined(HIP_ACCUM_ATOMIC)
+        rvecCopy( workspace.f[j], f_j );
+        e_hb_g[j] = e_hb_;
 #else
-        atomic_rvecAdd( workspace.f[j], f_j_l );
-        atomicAdd( (double *) e_hb_g, (double) e_hb_l );
+        atomic_rvecAdd( workspace.f[j], f_j );
+        atomicAdd( (double *) e_hb_g, (double) e_hb_ );
 #endif
     }
 }
 
 
 /* one thread per atom implementation */
-HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_parameters *sbp,
-        hbond_parameters *d_hbp, global_parameters gp,
-        control_params *control, storage workspace,
+HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom const * const my_atoms,
+        single_body_parameters const * const sbp, hbond_parameters const * const hbp,
+        global_parameters gp, control_params const * const control, storage workspace,
         reax_list far_nbr_list, reax_list bond_list, reax_list hbond_list, int n, 
-        int num_atom_types, real *e_hb_g )
+        int num_atom_types, real * const e_hb_g )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpReduce<double>::TempStorage, temp_d)
-    int i, j, k, pi, pk, thread_id, lane_id, itr;
+    extern __shared__ hipcub::WarpReduce<double>::TempStorage temp_d[];
+    int i, j, k, pi, pk, thread_id, warp_id, lane_id, itr;
     int type_i, type_j, type_k;
     int start_j, end_j, hb_start_j, hb_end_j;
-    int nbr_jk;
+    int nbr_jk, hbp_ijk;
     real r_jk, theta, cos_theta, sin_xhz4, cos_xhz1, sin_theta2;
-    real e_hb, e_hb_l, exp_hb2, exp_hb3, CEhb1, CEhb2, CEhb3;
+    real e_hb, e_hb_, exp_hb2, exp_hb3, CEhb1, CEhb2, CEhb3;
     rvec dcos_theta_di, dcos_theta_dj, dcos_theta_dk;
     rvec dvec_jk;
-    rvec f_j_l, f_k_l;
-    hbond_parameters *hbp;
+    rvec f_j, f_k;
     bond_order_data *bo_ij;
     bond_data *pbond_ij;
     hbond_data *phbond_jk;
@@ -242,6 +241,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_par
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize; 
 
     /* discover the Hydrogen bonds between i-j-k triplets.
@@ -258,8 +258,8 @@ HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_par
         end_j = End_Index( j, &bond_list );
         hb_start_j = Start_Index( my_atoms[j].Hindex, &hbond_list );
         hb_end_j = End_Index( my_atoms[j].Hindex, &hbond_list );
-        e_hb_l = 0.0;
-        rvec_MakeZero( f_j_l );
+        e_hb_ = 0.0;
+        rvec_MakeZero( f_j );
 
         /* for each hbond of atom j */
         for ( pk = hb_start_j; pk < hb_end_j; ++pk )
@@ -270,7 +270,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_par
             nbr_jk = phbond_jk->ptr;
             r_jk = far_nbr_list.far_nbr_list.d[nbr_jk];
 
-            rvec_MakeZero( f_k_l );
+            rvec_MakeZero( f_k );
 
             rvec_Scale( dvec_jk, hbond_list.hbond_list[pk].scl,
                     far_nbr_list.far_nbr_list.dvec[nbr_jk] );
@@ -289,7 +289,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_par
                             && bo_ij->BO >= HB_THRESHOLD
                             && my_atoms[i].orig_id != my_atoms[k].orig_id )
                     {
-                        hbp = &d_hbp[ index_hbp(type_i, type_j, type_k, num_atom_types) ];
+                        hbp_ijk = index_hbp(type_i, type_j, type_k, num_atom_types);
 
                         Calculate_Theta( pbond_ij->dvec, pbond_ij->d, dvec_jk, r_jk,
                                 &theta, &cos_theta );
@@ -303,68 +303,68 @@ HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_par
                         sin_xhz4 = SQR( sin_theta2 );
                         sin_xhz4 *= sin_xhz4;
                         cos_xhz1 = ( 1.0 - cos_theta );
-                        exp_hb2 = EXP( -1.0 * hbp->p_hb2 * bo_ij->BO );
-                        exp_hb3 = EXP( -1.0 * hbp->p_hb3 * ( hbp->r0_hb / r_jk
-                                    + r_jk / hbp->r0_hb - 2.0 ) );
+                        exp_hb2 = EXP( -1.0 * hbp[hbp_ijk].p_hb2 * bo_ij->BO );
+                        exp_hb3 = EXP( -1.0 * hbp[hbp_ijk].p_hb3 * ( hbp[hbp_ijk].r0_hb / r_jk
+                                    + r_jk / hbp[hbp_ijk].r0_hb - 2.0 ) );
 
-                        e_hb = hbp->p_hb1 * (1.0 - exp_hb2) * exp_hb3 * sin_xhz4;
-                        e_hb_l += e_hb;
+                        e_hb = hbp[hbp_ijk].p_hb1 * (1.0 - exp_hb2) * exp_hb3 * sin_xhz4;
+                        e_hb_ += e_hb;
 
-                        CEhb1 = hbp->p_hb1 * hbp->p_hb2 * exp_hb2 * exp_hb3 * sin_xhz4;
-                        CEhb2 = -0.5 * hbp->p_hb1 * (1.0 - exp_hb2) * exp_hb3 * cos_xhz1;
-                        CEhb3 = hbp->p_hb3 * e_hb * (hbp->r0_hb / SQR( r_jk )
-                                + -1.0 / hbp->r0_hb);
+                        CEhb1 = hbp[hbp_ijk].p_hb1 * hbp[hbp_ijk].p_hb2 * exp_hb2 * exp_hb3 * sin_xhz4;
+                        CEhb2 = -0.5 * hbp[hbp_ijk].p_hb1 * (1.0 - exp_hb2) * exp_hb3 * cos_xhz1;
+                        CEhb3 = hbp[hbp_ijk].p_hb3 * e_hb * (hbp[hbp_ijk].r0_hb / SQR( r_jk )
+                                + -1.0 / hbp[hbp_ijk].r0_hb);
 
                         /* hydrogen bond forces */
                         /* dbo term */
-                        bo_ij->Cdbo += CEhb1;
+                        atomicAdd( &bo_ij->Cdbo, CEhb1 );
 
                         /* dcos terms */
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                         rvec_ScaledAdd( pbond_ij->hb_f, CEhb2, dcos_theta_di ); 
 #else
                         atomic_rvecScaledAdd( workspace.f[i], CEhb2, dcos_theta_di );
 #endif
-                        rvec_ScaledAdd( f_j_l, CEhb2, dcos_theta_dj );
-                        rvec_ScaledAdd( f_k_l, CEhb2, dcos_theta_dk );
+                        rvec_ScaledAdd( f_j, CEhb2, dcos_theta_dj );
+                        rvec_ScaledAdd( f_k, CEhb2, dcos_theta_dk );
 
                         /* dr terms */
-                        rvec_ScaledAdd( f_j_l, -1.0 * CEhb3 / r_jk, dvec_jk ); 
-                        rvec_ScaledAdd( f_k_l, CEhb3 / r_jk, dvec_jk );
+                        rvec_ScaledAdd( f_j, -1.0 * CEhb3 / r_jk, dvec_jk ); 
+                        rvec_ScaledAdd( f_k, CEhb3 / r_jk, dvec_jk );
                     }
                 }
 
                 pi += warpSize;
             }
 
-            f_k_l[0] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_k_l[0]);
-            f_k_l[1] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_k_l[1]);
-            f_k_l[2] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_k_l[2]);
+            f_k[0] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_k[0]);
+            f_k[1] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_k[1]);
+            f_k[2] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_k[2]);
 
             if ( lane_id == 0 )
             {
-#if !defined(CUDA_ACCUM_ATOMIC)
-                rvec_Copy( phbond_jk->hb_f, f_k_l );
+#if !defined(HIP_ACCUM_ATOMIC)
+                rvec_Copy( phbond_jk->hb_f, f_k );
 #else
-                atomic_rvecAdd( workspace.f[k], f_k_l );
+                atomic_rvecAdd( workspace.f[k], f_k );
 #endif
             }
         }
 
-        f_j_l[0] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_j_l[0]);
-        f_j_l[1] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_j_l[1]);
-        f_j_l[2] = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(f_j_l[2]);
-        e_hb_l = hipcub::WarpReduce<double>(temp_d[j % (blockDim.x / warpSize)]).Sum(e_hb_l);
+        f_j[0] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_j[0]);
+        f_j[1] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_j[1]);
+        f_j[2] = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(f_j[2]);
+        e_hb_ = hipcub::WarpReduce<double>(temp_d[warp_id]).Sum(e_hb_);
 
         if ( lane_id == 0 )
         {
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
             /* write conflicts for accumulating partial forces resolved by subsequent kernels */
-            rvecCopy( workspace.f[j], f_j_l );
-            e_hb_g[j] = e_hb_l;
+            rvecCopy( workspace.f[j], f_j );
+            e_hb_g[j] = e_hb_;
 #else
-            atomic_rvecAdd( workspace.f[j], f_j_l );
-            atomicAdd( (double *) e_hb_g, (double) e_hb_l );
+            atomic_rvecAdd( workspace.f[j], f_j );
+            atomicAdd( (double *) e_hb_g, (double) e_hb_ );
 #endif
         }
     }
@@ -372,27 +372,26 @@ HIP_GLOBAL void k_hydrogen_bonds_part1_opt( reax_atom *my_atoms, single_body_par
 
 
 /* one thread per atom implementation */
-HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_parameters *sbp,
-        hbond_parameters *d_hbp, global_parameters gp,
-        control_params *control, storage workspace,
+HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom const * const my_atoms,
+        single_body_parameters const * const sbp, hbond_parameters const * const hbp,
+        global_parameters gp, control_params const * const control, storage workspace,
         reax_list far_nbr_list, reax_list bond_list, reax_list hbond_list, int n, 
-        int num_atom_types, real *e_hb_g, rvec *ext_press_g )
+        int num_atom_types, real * const e_hb_g, rvec * const ext_press_g )
 {
     int i, j, k, pi, pk;
     int type_i, type_j, type_k;
     int start_j, end_j, hb_start_j, hb_end_j;
     int *hblist, hblist_size;
     int itr, top;
-    int nbr_jk;
+    int nbr_jk, hbp_ijk;
     ivec rel_jk;
     real r_ij, r_jk, theta, cos_theta, sin_xhz4, cos_xhz1, sin_theta2;
-    real e_hb, e_hb_l, exp_hb2, exp_hb3, CEhb1, CEhb2, CEhb3;
+    real e_hb, e_hb_, exp_hb2, exp_hb3, CEhb1, CEhb2, CEhb3;
     rvec dcos_theta_di, dcos_theta_dj, dcos_theta_dk;
     rvec dvec_jk, temp, ext_press_l;
-#if defined(CUDA_ACCUM_ATOMIC)
-    rvec f_j_l;
+#if defined(HIP_ACCUM_ATOMIC)
+    rvec f_j;
 #endif
-    hbond_parameters *hbp;
     bond_order_data *bo_ij;
     bond_data *pbond_ij;
     hbond_data *phbond_jk;
@@ -404,10 +403,10 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
         return;
     }
 
-    e_hb_l = 0.0;
+    e_hb_ = 0.0;
     rvec_MakeZero( ext_press_l );
-#if defined(CUDA_ACCUM_ATOMIC)
-    rvec_MakeZero( f_j_l );
+#if defined(HIP_ACCUM_ATOMIC)
+    rvec_MakeZero( f_j );
 #endif
 
     /* discover the Hydrogen bonds between i-j-k triplets.
@@ -462,7 +461,7 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
             rvec_Scale( dvec_jk, hbond_list.hbond_list[pk].scl,
                     far_nbr_list.far_nbr_list.dvec[nbr_jk] );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
             rvec_MakeZero( phbond_jk->hb_f );
 #endif
 
@@ -478,7 +477,7 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
                     bo_ij = &pbond_ij->bo_data;
                     type_i = my_atoms[i].type;
                     r_ij = pbond_ij->d;
-                    hbp = &d_hbp[ index_hbp(type_i, type_j, type_k, num_atom_types) ];
+                    hbp_ijk = index_hbp(type_i, type_j, type_k, num_atom_types);
 
                     Calculate_Theta( pbond_ij->dvec, r_ij, dvec_jk, r_jk,
                             &theta, &cos_theta );
@@ -492,23 +491,23 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
                     sin_xhz4 = SQR( sin_theta2 );
                     sin_xhz4 *= sin_xhz4;
                     cos_xhz1 = ( 1.0 - cos_theta );
-                    exp_hb2 = EXP( -1.0 * hbp->p_hb2 * bo_ij->BO );
-                    exp_hb3 = EXP( -1.0 * hbp->p_hb3 * ( hbp->r0_hb / r_jk
-                                + r_jk / hbp->r0_hb - 2.0 ) );
+                    exp_hb2 = EXP( -1.0 * hbp[hbp_ijk].p_hb2 * bo_ij->BO );
+                    exp_hb3 = EXP( -1.0 * hbp[hbp_ijk].p_hb3 * ( hbp[hbp_ijk].r0_hb / r_jk
+                                + r_jk / hbp[hbp_ijk].r0_hb - 2.0 ) );
 
-                    e_hb = hbp->p_hb1 * (1.0 - exp_hb2) * exp_hb3 * sin_xhz4;
-                    e_hb_l += e_hb;
+                    e_hb = hbp[hbp_ijk].p_hb1 * (1.0 - exp_hb2) * exp_hb3 * sin_xhz4;
+                    e_hb_ += e_hb;
 
-                    CEhb1 = hbp->p_hb1 * hbp->p_hb2 * exp_hb2 * exp_hb3 * sin_xhz4;
-                    CEhb2 = -0.5 * hbp->p_hb1 * (1.0 - exp_hb2) * exp_hb3 * cos_xhz1;
-                    CEhb3 = hbp->p_hb3 * e_hb * (hbp->r0_hb / SQR( r_jk )
-                            + -1.0 / hbp->r0_hb);
+                    CEhb1 = hbp[hbp_ijk].p_hb1 * hbp[hbp_ijk].p_hb2 * exp_hb2 * exp_hb3 * sin_xhz4;
+                    CEhb2 = -0.5 * hbp[hbp_ijk].p_hb1 * (1.0 - exp_hb2) * exp_hb3 * cos_xhz1;
+                    CEhb3 = hbp[hbp_ijk].p_hb3 * e_hb * (hbp[hbp_ijk].r0_hb / SQR( r_jk )
+                            + -1.0 / hbp[hbp_ijk].r0_hb);
 
                     /* hydrogen bond forces */
                     /* dbo term */
-                    bo_ij->Cdbo += CEhb1;
+                    atomicAdd( &bo_ij->Cdbo, CEhb1 );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     /* for pressure coupling, terms that are not related to bond order
                      * derivatives are added directly into pressure vector/tensor */
                     /* dcos terms */
@@ -542,7 +541,7 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
                     rvec_iMultiply( temp, pbond_ij->rel_box, temp );
                     rvec_Add( ext_press_l, temp );
 
-                    rvec_ScaledAdd( f_j_l, CEhb2, dcos_theta_dj );
+                    rvec_ScaledAdd( f_j, CEhb2, dcos_theta_dj );
 
                     ivec_Scale( rel_jk, hbond_list.hbond_list[pk].scl,
                             far_nbr_list.far_nbr_list.rel_box[nbr_jk] );
@@ -552,7 +551,7 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
                     rvec_Add( ext_press_l, temp );
 
                     /* dr terms */
-                    rvec_ScaledAdd( f_j_l, -1.0 * CEhb3 / r_jk, dvec_jk ); 
+                    rvec_ScaledAdd( f_j, -1.0 * CEhb3 / r_jk, dvec_jk ); 
 
                     rvec_Scale( temp, CEhb3 / r_jk, dvec_jk );
                     atomic_rvecAdd( workspace.f[k], temp );
@@ -569,20 +568,20 @@ HIP_GLOBAL void k_hydrogen_bonds_virial_part1( reax_atom *my_atoms, single_body_
         }
     }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     /* write conflicts for accumulating partial forces resolved by subsequent kernels */
-    rvecCopy( workspace.f[j], f_j_l );
-    e_hb_g[j] = e_hb_l;
+    rvecCopy( workspace.f[j], f_j );
+    e_hb_g[j] = e_hb_;
     rvecCopy( ext_press_g[j], ext_press_l );
 #else
-    atomic_rvecAdd( workspace.f[j], f_j_l );
-    atomicAdd( (double *) e_hb_g, (double) e_hb_l );
+    atomic_rvecAdd( workspace.f[j], f_j );
+    atomicAdd( (double *) e_hb_g, (double) e_hb_ );
     atomic_rvecAdd( *ext_press_g, ext_press_l );
 #endif
 }
 
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
 /* Accumulate forces stored in the bond list
  * using a one thread per atom implementation */
 HIP_GLOBAL void k_hydrogen_bonds_part2( reax_atom *atoms,
@@ -618,8 +617,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part2( reax_atom *atoms,
 HIP_GLOBAL void k_hydrogen_bonds_part2_opt( reax_atom *atoms,
         storage workspace, reax_list bond_list, int n )
 {
-    typedef hipcub::WarpReduce<double> WarpReduce;
-    HIP_DYNAMIC_SHARED( typename WarpReduce::TempStorage, temp_storage)
+    extern __shared__ typedef hipcub::WarpReduce<double>::TempStorage temp_storage[];
     int j, pj, start, end;
     bond_data *pbond, *sym_index_bond;
     /* thread-local variables */
@@ -627,15 +625,15 @@ HIP_GLOBAL void k_hydrogen_bonds_part2_opt( reax_atom *atoms,
     rvec hb_f;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    warp_id = thread_id / warpSize;
-    lane_id = thread_id % warpSize;
+    j = thread_id / warpSize;
 
-    if ( warp_id >= n )
+    if ( j >= n )
     {
         return;
     }
 
-    j = warp_id;
+    lane_id = thread_id % warpSize; 
+    warp_id = threadIdx.x / warpSize;
     start = Start_Index( j, &bond_list );
     end = End_Index( j, &bond_list );
     pj = start + lane_id;
@@ -653,9 +651,9 @@ HIP_GLOBAL void k_hydrogen_bonds_part2_opt( reax_atom *atoms,
 
     __syncthreads( );
 
-    hb_f[0] = WarpReduce(temp_storage[warp_id]).Sum(hb_f[0]);
-    hb_f[1] = WarpReduce(temp_storage[warp_id]).Sum(hb_f[1]);
-    hb_f[2] = WarpReduce(temp_storage[warp_id]).Sum(hb_f[2]);
+    hb_f[0] = hipcub::WarpReduce<double>(temp_storage[warp_id]).Sum(hb_f[0]);
+    hb_f[1] = hipcub::WarpReduce<double>(temp_storage[warp_id]).Sum(hb_f[1]);
+    hb_f[2] = hipcub::WarpReduce<double>(temp_storage[warp_id]).Sum(hb_f[2]);
 
     /* first thread within a warp writes warp-level sums to global memory */
     if ( lane_id == 0 )
@@ -700,8 +698,7 @@ HIP_GLOBAL void k_hydrogen_bonds_part3( reax_atom *atoms,
 HIP_GLOBAL void k_hydrogen_bonds_part3_opt( reax_atom *atoms,
         storage workspace, reax_list hbond_list, int n )
 {
-    typedef hipcub::WarpReduce<double> WarpReduce;
-    HIP_DYNAMIC_SHARED( typename WarpReduce::TempStorage, temp_storage)
+    extern __shared__ hipcub::WarpReduce<double>::TempStorage temp_storage[];
     int j, pj, start, end;
     hbond_data *nbr_pj, *sym_index_nbr;
     /* thread-local variables */
@@ -709,15 +706,15 @@ HIP_GLOBAL void k_hydrogen_bonds_part3_opt( reax_atom *atoms,
     rvec hb_f_l;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    warp_id = thread_id / warpSize;
-    lane_id = thread_id % warpSize;
+    j = thread_id / warpSize;
 
-    if ( warp_id >= n )
+    if ( j >= n )
     {
         return;
     }
 
-    j = warp_id;
+    warp_id = threadIdx.x / warpSize;
+    lane_id = thread_id % warpSize; 
     start = Start_Index( atoms[j].Hindex, &hbond_list );
     end = End_Index( atoms[j].Hindex, &hbond_list );
     pj = start + lane_id;
@@ -735,9 +732,9 @@ HIP_GLOBAL void k_hydrogen_bonds_part3_opt( reax_atom *atoms,
 
     __syncthreads( );
 
-    hb_f_l[0] = WarpReduce(temp_storage[warp_id]).Sum(hb_f_l[0]);
-    hb_f_l[1] = WarpReduce(temp_storage[warp_id]).Sum(hb_f_l[1]);
-    hb_f_l[2] = WarpReduce(temp_storage[warp_id]).Sum(hb_f_l[2]);
+    hb_f_l[0] = hipcub::WarpReduce<double>(temp_storage[warp_id]).Sum(hb_f_l[0]);
+    hb_f_l[1] = hipcub::WarpReduce<double>(temp_storage[warp_id]).Sum(hb_f_l[1]);
+    hb_f_l[2] = hipcub::WarpReduce<double>(temp_storage[warp_id]).Sum(hb_f_l[2]);
 
     /* first thread within a warp writes warp-level sums to global memory */
     if ( lane_id == 0 )
@@ -749,42 +746,47 @@ HIP_GLOBAL void k_hydrogen_bonds_part3_opt( reax_atom *atoms,
 
 
 
-void Hip_Compute_Hydrogen_Bonds( reax_system *system, control_params *control,
-        simulation_data *data, storage *workspace, 
-        reax_list **lists, output_controls *out_control )
+void Hip_Compute_Hydrogen_Bonds( reax_system const * const system,
+        control_params const * const control, simulation_data * const data,
+        storage * const workspace, reax_list ** lists,
+        output_controls const * const out_control )
 {
     int blocks;
 //    int hbs, hnbrs_blocks;
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     int update_energy;
     real *spad;
     rvec *rvec_spad;
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-                (sizeof(real) * 3 + sizeof(rvec)) * system->N + sizeof(rvec) * control->blocks_n,
-            "Hip_Compute_Hydrogen_Bonds::workspace->scratch" );
-    spad = (real *) workspace->scratch;
+    sHipCheckMalloc( &workspace->scratch[2], &workspace->scratch_size[2],
+            (sizeof(real) * 3 + sizeof(rvec)) * system->N + sizeof(rvec) * control->blocks_n,
+            __FILE__, __LINE__ );
+    spad = (real *) workspace->scratch[2];
     update_energy = (out_control->energy_update_freq > 0
             && data->step % out_control->energy_update_freq == 0) ? TRUE : FALSE;
 #else
-    hip_memset( &((simulation_data *)data->d_simulation_data)->my_en.e_hb,
-            0, sizeof(real), "Hip_Compute_Hydrogen_Bonds::e_hb" );
+    sHipMemsetAsync( &((simulation_data *)data->d_simulation_data)->my_en.e_hb,
+            0, sizeof(real), control->streams[2], __FILE__, __LINE__ );
     if ( control->virial == 1 )
     {
-        hip_memset( &((simulation_data *)data->d_simulation_data)->my_ext_press,
-                0, sizeof(rvec), "Hip_Compute_Hydrogen_Bonds::my_ext_press" );
+        sHipMemsetAsync( &((simulation_data *)data->d_simulation_data)->my_ext_press,
+                0, sizeof(rvec), control->streams[2], __FILE__, __LINE__ );
     }
 #endif
 
+    hipStreamWaitEvent( control->streams[2], control->stream_events[3], 0 );
+
     if ( control->virial == 1 )
     {
-        hipLaunchKernelGGL(k_hydrogen_bonds_virial_part1, dim3(control->blocks), dim3(control->block_size ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_hydrogen_bonds_virial_part1 <<< control->blocks, control->block_size,
+                                      0, control->streams[2] >>>
+                ( system->d_my_atoms, system->reax_param.d_sbp,
                   system->reax_param.d_hbp, system->reax_param.d_gp,
                   (control_params *) control->d_control_params,
                   *(workspace->d_workspace),
                   *(lists[FAR_NBRS]), *(lists[BONDS]), *(lists[HBONDS]),
                   system->n, system->reax_param.num_atom_types,
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                   spad, (rvec *) (&spad[system->n])
 #else
                   &((simulation_data *)data->d_simulation_data)->my_en.e_hb,
@@ -795,14 +797,14 @@ void Hip_Compute_Hydrogen_Bonds( reax_system *system, control_params *control,
     }
     else
     {
-//        k_hydrogen_bonds_part1 <<< control->blocks, control->block_size >>>
+//        k_hydrogen_bonds_part1 <<< control->blocks, control->block_size, 0, control->streams[2] >>>
 //                ( system->d_my_atoms, system->reax_param.d_sbp,
 //                  system->reax_param.d_hbp, system->reax_param.d_gp,
 //                  (control_params *) control->d_control_params,
 //                  *(workspace->d_workspace),
 //                  *(lists[FAR_NBRS]), *(lists[BONDS]), *(lists[HBONDS]),
 //                  system->n, system->reax_param.num_atom_types,
-//#if !defined(CUDA_ACCUM_ATOMIC)
+//#if !defined(HIP_ACCUM_ATOMIC)
 //                  spad
 //#else
 //                  &((simulation_data *)data->d_simulation_data)->my_en.e_hb
@@ -813,13 +815,16 @@ void Hip_Compute_Hydrogen_Bonds( reax_system *system, control_params *control,
         blocks = system->n * warpSize / DEF_BLOCK_SIZE
             + (system->n * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
         
-        hipLaunchKernelGGL(k_hydrogen_bonds_part1_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpReduce<double>::TempStorage) * (DEF_BLOCK_SIZE / 64) , 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_hydrogen_bonds_part1_opt <<< blocks, DEF_BLOCK_SIZE,
+                                   sizeof(hipcub::WarpReduce<double>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                                   control->streams[2] >>>
+                ( system->d_my_atoms, system->reax_param.d_sbp,
                   system->reax_param.d_hbp, system->reax_param.d_gp,
                   (control_params *) control->d_control_params,
                   *(workspace->d_workspace),
                   *(lists[FAR_NBRS]), *(lists[BONDS]), *(lists[HBONDS]),
                   system->n, system->reax_param.num_atom_types,
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                   spad
 #else
                   &((simulation_data *)data->d_simulation_data)->my_en.e_hb
@@ -828,42 +833,50 @@ void Hip_Compute_Hydrogen_Bonds( reax_system *system, control_params *control,
         hipCheckError( );
     }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     if ( update_energy == TRUE )
     {
         Hip_Reduction_Sum( spad,
                 &((simulation_data *)data->d_simulation_data)->my_en.e_hb,
-                system->n );
+                system->n, 2, control->streams[2] );
     }
 
     if ( control->virial == 1 )
     {
         rvec_spad = (rvec *) (&spad[system->n]);
 
-        hipLaunchKernelGGL(k_reduction_rvec, dim3(control->blocks), dim3(control->block_size), sizeof(rvec) * (control->block_size / warpSize) , 0,  rvec_spad, &rvec_spad[system->n], system->n );
+        k_reduction_rvec <<< control->blocks, control->block_size,
+                          sizeof(rvec) * (control->block_size / warpSize),
+                          control->streams[2] >>>
+            ( rvec_spad, &rvec_spad[system->n], system->n );
         hipCheckError( );
 
-        hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(control->blocks_pow_2), sizeof(rvec) * (control->blocks_pow_2 / warpSize) , 0,  &rvec_spad[system->n],
+        k_reduction_rvec <<< 1, control->blocks_pow_2,
+                         sizeof(rvec) * (control->blocks_pow_2 / warpSize),
+                         control->streams[2] >>>
+            ( &rvec_spad[system->n],
               &((simulation_data *)data->d_simulation_data)->my_ext_press,
               control->blocks );
         hipCheckError( );
 //        Hip_Reduction_Sum( rvec_spad,
 //                &((simulation_data *)data->d_simulation_data)->my_ext_press,
-//                system->n );
+//                system->n, 2, control->streams[2] );
     }
-#endif
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-    hipLaunchKernelGGL(k_hydrogen_bonds_part2, dim3(control->blocks), dim3(control->block_size ), 0, 0,  system->d_my_atoms, *(workspace->d_workspace),
+    k_hydrogen_bonds_part2 <<< control->blocks, control->block_size, 0,
+                           control->streams[2] >>>
+        ( system->d_my_atoms, *(workspace->d_workspace),
           *(lists[BONDS]), system->n );
     hipCheckError( );
 
 //    hnbrs_blocks = (system->n * HB_POST_PROC_KER_THREADS_PER_ATOM / HB_POST_PROC_BLOCK_SIZE) +
 //        (((system->n * HB_POST_PROC_KER_THREADS_PER_ATOM) % HB_POST_PROC_BLOCK_SIZE) == 0 ? 0 : 1);
 
-    hipLaunchKernelGGL(k_hydrogen_bonds_part3, dim3(control->blocks), dim3(control->block_size ), 0, 0,  system->d_my_atoms, *(workspace->d_workspace), *(lists[HBONDS]), system->n );
+    k_hydrogen_bonds_part3 <<< control->blocks, control->block_size, 0,
+                           control->streams[2] >>>
+        ( system->d_my_atoms, *(workspace->d_workspace), *(lists[HBONDS]), system->n );
 //    k_hydrogen_bonds_part3_opt <<< hnbrs_blocks, HB_POST_PROC_BLOCK_SIZE, 
-//            HB_POST_PROC_BLOCK_SIZE * sizeof(rvec) >>>
+//            sizeof(rvec) * HB_POST_PROC_BLOCK_SIZE, control->streams[2] >>>
 //        ( system->d_my_atoms, *(workspace->d_workspace), *(lists[HBONDS]), system->n );
     hipCheckError( );
 #endif

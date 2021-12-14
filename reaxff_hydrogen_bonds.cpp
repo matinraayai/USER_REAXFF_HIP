@@ -19,16 +19,12 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-
-
-
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
 
 #if defined(PURE_REAX)
-  #include "reax_types.h"
   #include "hydrogen_bonds.h"
 
   #include "bond_orders.h"
@@ -38,7 +34,6 @@
   #include "valence_angles.h"
   #include "vector.h"
 #elif defined(LAMMPS_REAX)
-  #include "reaxff_types.h"
   #include "reaxff_hydrogen_bonds.h"
 
   #include "reaxff_bond_orders.h"
@@ -102,7 +97,7 @@ void Hydrogen_Bonds( reax_system * const system, control_params * const control,
             {
                 hblist_size = Num_Entries( j, bond_list );
                 hblist = static_cast<int*>(srealloc( hblist, sizeof(int) * hblist_size,
-                        "Hydrogen_Bonds::hblist" ));
+                                                     __FILE__, __LINE__ ));
             }
 
             /* search bonded atoms i to atom j (hydrogen atom) for potential hydrogen bonding */
@@ -248,7 +243,7 @@ void Hydrogen_Bonds( reax_system * const system, control_params * const control,
 
     if ( hblist != NULL )
     {
-        sfree( hblist, "Hydrogen_Bonds::hblist" );
+        sfree( hblist, __FILE__, __LINE__ );
     }
 
 #if defined(DEBUG_FOCUS)

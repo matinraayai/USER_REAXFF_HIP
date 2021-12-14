@@ -19,12 +19,9 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-
-
-
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
 
 #if defined(PURE_REAX)
@@ -44,6 +41,8 @@
   #include "reaxff_vector.h"
   #include "reaxff_index_utils.h"
 #endif
+
+
 
 
 void Bonds( reax_system * const system, control_params * const control,

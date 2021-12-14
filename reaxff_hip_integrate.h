@@ -19,13 +19,17 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_INTEGRATE_H_
-#define __CUDA_INTEGRATE_H_
+#ifndef __HIP_INTEGRATE_H_
+#define __HIP_INTEGRATE_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
+#endif
 
 
-void Hip_Scale_Velocities_NPT( reax_system *, real, rvec );
+void Hip_Scale_Velocities_NPT( reax_system *, control_params *, real, rvec );
 
 int Hip_Velocity_Verlet_NVE( reax_system*, control_params*,
         simulation_data*, storage*, reax_list**, output_controls*,

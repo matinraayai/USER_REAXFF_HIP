@@ -22,7 +22,11 @@
 #ifndef __LIST_H_
 #define __LIST_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+#else
+    #include "reax_types.h"
+#endif
 
 
 #ifdef __cplusplus

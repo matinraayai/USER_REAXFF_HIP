@@ -22,12 +22,11 @@
 #ifndef __INIT_MD_H_
 #define __INIT_MD_H_
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "reax_types.h"
 #endif
-
 
 #ifdef __cplusplus
 extern "C" {

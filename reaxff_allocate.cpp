@@ -21,11 +21,8 @@
 
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
-
-
-
 
 #if defined(PURE_REAX)
   #include "allocate.h"
@@ -82,15 +79,15 @@ void PreAllocate_Space( reax_system * const system, control_params * const contr
 #endif
 
     system->my_atoms = static_cast<reax_atom*>(scalloc( system->total_cap, sizeof(reax_atom),
-            "PreAllocate_Space::system->my_atoms" ));
+                                                        __FILE__, __LINE__ ));
 
     /* space for keeping restriction info, if any */
     if ( control->restrict_bonds )
     {
         workspace->restricted = static_cast<int*>(scalloc( system->local_cap, sizeof(int),
-                "PreAllocate_Space::workspace->restricted_atoms" ));
+                                                           __FILE__, __LINE__ ));
         workspace->restricted_list = static_cast<int*>(scalloc( system->local_cap * MAX_RESTRICT,
-                sizeof(int), "PreAllocate_Space::workspace->restricted_list" ));
+                                                                sizeof(int), __FILE__, __LINE__ ));
     }
 }
 
@@ -98,9 +95,9 @@ void PreAllocate_Space( reax_system * const system, control_params * const contr
 void Reallocate_System_Part1( reax_system * const system, int local_cap )
 {
     system->cm_entries = static_cast<int*>(srealloc( system->cm_entries, sizeof(int) * local_cap,
-            "Reallocate_System_Part1::system->cm_entries" ));
+                                                     __FILE__, __LINE__ ));
     system->max_cm_entries = static_cast<int*>(srealloc( system->max_cm_entries, sizeof(int) * local_cap,
-            "Reallocate_System_Part1::system->max_cm_entries" ));
+                                                         __FILE__, __LINE__ ));
 }
 
 
@@ -108,23 +105,23 @@ void Reallocate_System_Part1( reax_system * const system, int local_cap )
 void Reallocate_System_Part2( reax_system * const system, int total_cap )
 {
     system->my_atoms = static_cast<reax_atom*>(srealloc( system->my_atoms, sizeof(reax_atom) * total_cap,
-            "Reallocate_System_Part2::system->my_atoms" ));
+                                                         __FILE__, __LINE__ ));
 
     /* list management */
     system->far_nbrs = static_cast<int*>(srealloc( system->far_nbrs, sizeof(int) * total_cap,
-            "Reallocate_System_Part2::system->far_nbrs" ));
+                                                   __FILE__, __LINE__ ));
     system->max_far_nbrs = static_cast<int*>(srealloc( system->max_far_nbrs, sizeof(int) * total_cap,
-            "Reallocate_System_Part2::system->max_far_nbrs" ));
+                                                       __FILE__, __LINE__ ));
 
     system->bonds = static_cast<int*>(srealloc( system->bonds, sizeof(int) * total_cap,
-            "Reallocate_System_Part2::system->bonds" ));
+                                                __FILE__, __LINE__ ));
     system->max_bonds = static_cast<int*>(srealloc( system->max_bonds, sizeof(int) * total_cap,
-            "Reallocate_System_Part2::system->max_bonds" ));
+                                                    __FILE__, __LINE__ ));
 
     system->hbonds = static_cast<int*>(srealloc( system->hbonds, sizeof(int) * total_cap,
-            "Reallocate_System_Part2::system->hbonds" ));
+                                                 __FILE__, __LINE__ ));
     system->max_hbonds = static_cast<int*>(srealloc( system->max_hbonds, sizeof(int) * total_cap,
-            "Reallocate_System_Part2::system->max_hbonds" ));
+                                                     __FILE__, __LINE__ ));
 }
 
 
@@ -134,19 +131,19 @@ static void Deallocate_Workspace_Part1( control_params * const control,
     /* Nose-Hoover integrator */
     if ( control->ensemble == nhNVT )
     {
-        sfree( workspace->v_const, "Deallocate_Workspace_Part1::v_const" );
+        sfree( workspace->v_const, __FILE__, __LINE__ );
     }
 
     /* storage for analysis */
     if ( control->molecular_analysis || control->diffusion_coef )
     {
-        sfree( workspace->mark, "Deallocate_Workspace_Part1::mark" );
-        sfree( workspace->old_mark, "Deallocate_Workspace_Part1::old_mark" );
+        sfree( workspace->mark, __FILE__, __LINE__ );
+        sfree( workspace->old_mark, __FILE__, __LINE__ );
     }
 
     if ( control->diffusion_coef )
     {
-        sfree( workspace->x_old, "Deallocate_Workspace_Part1::x_old" );
+        sfree( workspace->x_old, __FILE__, __LINE__ );
     }
 }
 
@@ -155,120 +152,148 @@ static void Deallocate_Workspace_Part2( control_params * const control,
         storage * const workspace )
 {
     /* bond order storage */
-    sfree( workspace->total_bond_order, "Deallocate_Workspace_Part2::total_bo" );
-    sfree( workspace->Deltap, "Deallocate_Workspace_Part2::Deltap" );
-    sfree( workspace->Deltap_boc, "Deallocate_Workspace_Part2::Deltap_boc" );
-    sfree( workspace->dDeltap_self, "Deallocate_Workspace_Part2::dDeltap_self" );
-    sfree( workspace->Delta, "Deallocate_Workspace_Part2::Delta" );
-    sfree( workspace->Delta_lp, "Deallocate_Workspace_Part2::Delta_lp" );
-    sfree( workspace->Delta_lp_temp, "Deallocate_Workspace_Part2::Delta_lp_temp" );
-    sfree( workspace->dDelta_lp, "Deallocate_Workspace_Part2::dDelta_lp" );
-    sfree( workspace->dDelta_lp_temp, "Deallocate_Workspace_Part2::dDelta_lp_temp" );
-    sfree( workspace->Delta_e, "Deallocate_Workspace_Part2::Delta_e" );
-    sfree( workspace->Delta_boc, "Deallocate_Workspace_Part2::Delta_boc" );
-    sfree( workspace->nlp, "Deallocate_Workspace_Part2::nlp" );
-    sfree( workspace->nlp_temp, "Deallocate_Workspace_Part2::nlp_temp" );
-    sfree( workspace->Clp, "Deallocate_Workspace_Part2::Clp" );
-    sfree( workspace->vlpex, "Deallocate_Workspace_Part2::vlpex" );
-    sfree( workspace->bond_mark, "Deallocate_Workspace_Part2::bond_mark" );
+    sfree( workspace->total_bond_order, __FILE__, __LINE__ );
+    sfree( workspace->Deltap, __FILE__, __LINE__ );
+    sfree( workspace->Deltap_boc, __FILE__, __LINE__ );
+    sfree( workspace->dDeltap_self, __FILE__, __LINE__ );
+    sfree( workspace->Delta, __FILE__, __LINE__ );
+    sfree( workspace->Delta_lp, __FILE__, __LINE__ );
+    sfree( workspace->Delta_lp_temp, __FILE__, __LINE__ );
+    sfree( workspace->dDelta_lp, __FILE__, __LINE__ );
+    sfree( workspace->dDelta_lp_temp, __FILE__, __LINE__ );
+    sfree( workspace->Delta_e, __FILE__, __LINE__ );
+    sfree( workspace->Delta_boc, __FILE__, __LINE__ );
+    sfree( workspace->nlp, __FILE__, __LINE__ );
+    sfree( workspace->nlp_temp, __FILE__, __LINE__ );
+    sfree( workspace->Clp, __FILE__, __LINE__ );
+    sfree( workspace->vlpex, __FILE__, __LINE__ );
+    sfree( workspace->bond_mark, __FILE__, __LINE__ );
 
     /* charge matrix storage */
     if ( control->cm_solver_pre_comp_type == JACOBI_PC )
     {
-        sfree( workspace->Hdia_inv, "Deallocate_Workspace_Part2::workspace->Hdia_inv" );
+        sfree( workspace->Hdia_inv, __FILE__, __LINE__ );
     }
     if ( control->cm_solver_pre_comp_type == ICHOLT_PC
             || control->cm_solver_pre_comp_type == ILUT_PC
             || control->cm_solver_pre_comp_type == ILUTP_PC
             || control->cm_solver_pre_comp_type == FG_ILUT_PC )
     {
-        sfree( workspace->droptol, "Deallocate_Workspace_Part2::workspace->droptol" );
+        sfree( workspace->droptol, __FILE__, __LINE__ );
     }
-    sfree( workspace->b_s, "Deallocate_Workspace_Part2::workspace->b_s" );
-    sfree( workspace->b_t, "Deallocate_Workspace_Part2::workspace->b_t" );
-    sfree( workspace->b_prc, "Deallocate_Workspace_Part2::workspace->b_prc" );
-    sfree( workspace->b_prm, "Deallocate_Workspace_Part2::workspace->b_prm" );
-    sfree( workspace->s, "Deallocate_Workspace_Part2::workspace->s" );
-    sfree( workspace->t, "Deallocate_Workspace_Part2::workspace->t" );
+    sfree( workspace->b_s, __FILE__, __LINE__ );
+    sfree( workspace->b_t, __FILE__, __LINE__ );
+    sfree( workspace->b_prc, __FILE__, __LINE__ );
+    sfree( workspace->b_prm, __FILE__, __LINE__ );
+    sfree( workspace->s, __FILE__, __LINE__ );
+    sfree( workspace->t, __FILE__, __LINE__ );
 
     switch ( control->cm_solver_type )
     {
         case GMRES_S:
         case GMRES_H_S:
-            sfree( workspace->y, "Deallocate_Workspace_Part2::workspace->y" );
-            sfree( workspace->z, "Deallocate_Workspace_Part2::workspace->z" );
-            sfree( workspace->g, "Deallocate_Workspace_Part2::workspace->g" );
-            sfree( workspace->h, "Deallocate_Workspace_Part2::workspace->h" );
-            sfree( workspace->hs, "Deallocate_Workspace_Part2::workspace->hs" );
-            sfree( workspace->hc, "Deallocate_Workspace_Part2::workspace->hc" );
-            sfree( workspace->v, "Deallocate_Workspace_Part2::workspace->v" );
+            sfree( workspace->y, __FILE__, __LINE__ );
+            sfree( workspace->z, __FILE__, __LINE__ );
+            sfree( workspace->g, __FILE__, __LINE__ );
+            sfree( workspace->h, __FILE__, __LINE__ );
+            sfree( workspace->hs, __FILE__, __LINE__ );
+            sfree( workspace->hc, __FILE__, __LINE__ );
+            sfree( workspace->v, __FILE__, __LINE__ );
             break;
 
         case CG_S:
-            sfree( workspace->r, "Deallocate_Workspace_Part2::workspace->r" );
-            sfree( workspace->d, "Deallocate_Workspace_Part2::workspace->d" );
-            sfree( workspace->q, "Deallocate_Workspace_Part2::workspace->q" );
-            sfree( workspace->p, "Deallocate_Workspace_Part2::workspace->p" );
-            sfree( workspace->r2, "Deallocate_Workspace_Part2::workspace->r2" );
-            sfree( workspace->d2, "Deallocate_Workspace_Part2::workspace->d2" );
-            sfree( workspace->q2, "Deallocate_Workspace_Part2::workspace->q2" );
-            sfree( workspace->p2, "Deallocate_Workspace_Part2::workspace->p2" );
+            sfree( workspace->r, __FILE__, __LINE__ );
+            sfree( workspace->d, __FILE__, __LINE__ );
+            sfree( workspace->q, __FILE__, __LINE__ );
+            sfree( workspace->p, __FILE__, __LINE__ );
+#if defined(DUAL_SOLVER)
+            sfree( workspace->r2, __FILE__, __LINE__ );
+            sfree( workspace->d2, __FILE__, __LINE__ );
+            sfree( workspace->q2, __FILE__, __LINE__ );
+            sfree( workspace->p2, __FILE__, __LINE__ );
+#endif
             break;
 
         case SDM_S:
-            sfree( workspace->r, "Deallocate_Workspace_Part2::workspace->r" );
-            sfree( workspace->d, "Deallocate_Workspace_Part2::workspace->d" );
-            sfree( workspace->q, "Deallocate_Workspace_Part2::workspace->q" );
-            sfree( workspace->p, "Deallocate_Workspace_Part2::workspace->p" );
-            sfree( workspace->r2, "Deallocate_Workspace_Part2::workspace->r2" );
-            sfree( workspace->d2, "Deallocate_Workspace_Part2::workspace->d2" );
-            sfree( workspace->q2, "Deallocate_Workspace_Part2::workspace->q2" );
-            sfree( workspace->p2, "Deallocate_Workspace_Part2::workspace->p2" );
+            sfree( workspace->r, __FILE__, __LINE__ );
+            sfree( workspace->d, __FILE__, __LINE__ );
+            sfree( workspace->q, __FILE__, __LINE__ );
+            sfree( workspace->p, __FILE__, __LINE__ );
+#if defined(DUAL_SOLVER)
+            sfree( workspace->r2, __FILE__, __LINE__ );
+            sfree( workspace->d2, __FILE__, __LINE__ );
+            sfree( workspace->q2, __FILE__, __LINE__ );
+            sfree( workspace->p2, __FILE__, __LINE__ );
+#endif
             break;
 
         case BiCGStab_S:
-            sfree( workspace->y, "Deallocate_Workspace_Part2::workspace->y" );
-            sfree( workspace->g, "Deallocate_Workspace_Part2::workspace->g" );
-            sfree( workspace->z, "Deallocate_Workspace_Part2::workspace->z" );
-            sfree( workspace->r, "Deallocate_Workspace_Part2::workspace->r" );
-            sfree( workspace->d, "Deallocate_Workspace_Part2::workspace->d" );
-            sfree( workspace->q, "Deallocate_Workspace_Part2::workspace->q" );
-            sfree( workspace->p, "Deallocate_Workspace_Part2::workspace->p" );
-            sfree( workspace->r_hat, "Deallocate_Workspace_Part2::workspace->r_hat" );
-            sfree( workspace->q_hat, "Deallocate_Workspace_Part2::workspace->q_hat" );
+            sfree( workspace->y, __FILE__, __LINE__ );
+            sfree( workspace->g, __FILE__, __LINE__ );
+            sfree( workspace->z, __FILE__, __LINE__ );
+            sfree( workspace->r, __FILE__, __LINE__ );
+            sfree( workspace->d, __FILE__, __LINE__ );
+            sfree( workspace->q, __FILE__, __LINE__ );
+            sfree( workspace->p, __FILE__, __LINE__ );
+            sfree( workspace->r_hat, __FILE__, __LINE__ );
+            sfree( workspace->q_hat, __FILE__, __LINE__ );
+#if defined(DUAL_SOLVER)
+            sfree( workspace->y2, __FILE__, __LINE__ );
+            sfree( workspace->g2, __FILE__, __LINE__ );
+            sfree( workspace->z2, __FILE__, __LINE__ );
+            sfree( workspace->r2, __FILE__, __LINE__ );
+            sfree( workspace->d2, __FILE__, __LINE__ );
+            sfree( workspace->q2, __FILE__, __LINE__ );
+            sfree( workspace->p2, __FILE__, __LINE__ );
+            sfree( workspace->r_hat2, __FILE__, __LINE__ );
+            sfree( workspace->q_hat2, __FILE__, __LINE__ );
+#endif
             break;
 
         case PIPECG_S:
-            sfree( workspace->z, "Deallocate_Workspace_Part2::workspace->z" );
-            sfree( workspace->r, "Deallocate_Workspace_Part2::workspace->r" );
-            sfree( workspace->d, "Deallocate_Workspace_Part2::workspace->d" );
-            sfree( workspace->q, "Deallocate_Workspace_Part2::workspace->q" );
-            sfree( workspace->p, "Deallocate_Workspace_Part2::workspace->p" );
-            sfree( workspace->m, "Deallocate_Workspace_Part2::workspace->m" );
-            sfree( workspace->n, "Deallocate_Workspace_Part2::workspace->n" );
-            sfree( workspace->u, "Deallocate_Workspace_Part2::workspace->u" );
-            sfree( workspace->w, "Deallocate_Workspace_Part2::workspace->w" );
-            sfree( workspace->z2, "Deallocate_Workspace_Part2::workspace->z2" );
-            sfree( workspace->r2, "Deallocate_Workspace_Part2::workspace->r2" );
-            sfree( workspace->d2, "Deallocate_Workspace_Part2::workspace->d2" );
-            sfree( workspace->q2, "Deallocate_Workspace_Part2::workspace->q2" );
-            sfree( workspace->p2, "Deallocate_Workspace_Part2::workspace->p2" );
-            sfree( workspace->m2, "Deallocate_Workspace_Part2::workspace->m2" );
-            sfree( workspace->n2, "Deallocate_Workspace_Part2::workspace->n2" );
-            sfree( workspace->u2, "Deallocate_Workspace_Part2::workspace->u2" );
-            sfree( workspace->w2, "Deallocate_Workspace_Part2::workspace->w2" );
+            sfree( workspace->z, __FILE__, __LINE__ );
+            sfree( workspace->r, __FILE__, __LINE__ );
+            sfree( workspace->d, __FILE__, __LINE__ );
+            sfree( workspace->q, __FILE__, __LINE__ );
+            sfree( workspace->p, __FILE__, __LINE__ );
+            sfree( workspace->m, __FILE__, __LINE__ );
+            sfree( workspace->n, __FILE__, __LINE__ );
+            sfree( workspace->u, __FILE__, __LINE__ );
+            sfree( workspace->w, __FILE__, __LINE__ );
+#if defined(DUAL_SOLVER)
+            sfree( workspace->z2, __FILE__, __LINE__ );
+            sfree( workspace->r2, __FILE__, __LINE__ );
+            sfree( workspace->d2, __FILE__, __LINE__ );
+            sfree( workspace->q2, __FILE__, __LINE__ );
+            sfree( workspace->p2, __FILE__, __LINE__ );
+            sfree( workspace->m2, __FILE__, __LINE__ );
+            sfree( workspace->n2, __FILE__, __LINE__ );
+            sfree( workspace->u2, __FILE__, __LINE__ );
+            sfree( workspace->w2, __FILE__, __LINE__ );
+#endif
             break;
 
         case PIPECR_S:
-            sfree( workspace->z, "Deallocate_Workspace_Part2::workspace->z" );
-            sfree( workspace->r, "Deallocate_Workspace_Part2::workspace->r" );
-            sfree( workspace->d, "Deallocate_Workspace_Part2::workspace->d" );
-            sfree( workspace->q, "Deallocate_Workspace_Part2::workspace->q" );
-            sfree( workspace->p, "Deallocate_Workspace_Part2::workspace->p" );
-            sfree( workspace->m, "Deallocate_Workspace_Part2::workspace->m" );
-            sfree( workspace->n, "Deallocate_Workspace_Part2::workspace->n" );
-            sfree( workspace->u, "Deallocate_Workspace_Part2::workspace->u" );
-            sfree( workspace->w, "Deallocate_Workspace_Part2::workspace->w" );
+            sfree( workspace->z, __FILE__, __LINE__ );
+            sfree( workspace->r, __FILE__, __LINE__ );
+            sfree( workspace->d, __FILE__, __LINE__ );
+            sfree( workspace->q, __FILE__, __LINE__ );
+            sfree( workspace->p, __FILE__, __LINE__ );
+            sfree( workspace->m, __FILE__, __LINE__ );
+            sfree( workspace->n, __FILE__, __LINE__ );
+            sfree( workspace->u, __FILE__, __LINE__ );
+            sfree( workspace->w, __FILE__, __LINE__ );
+#if defined(DUAL_SOLVER)
+            sfree( workspace->z2, __FILE__, __LINE__ );
+            sfree( workspace->r2, __FILE__, __LINE__ );
+            sfree( workspace->d2, __FILE__, __LINE__ );
+            sfree( workspace->q2, __FILE__, __LINE__ );
+            sfree( workspace->p2, __FILE__, __LINE__ );
+            sfree( workspace->m2, __FILE__, __LINE__ );
+            sfree( workspace->n2, __FILE__, __LINE__ );
+            sfree( workspace->u2, __FILE__, __LINE__ );
+            sfree( workspace->w2, __FILE__, __LINE__ );
+#endif
             break;
 
         default:
@@ -278,30 +303,30 @@ static void Deallocate_Workspace_Part2( control_params * const control,
     }
 
     /* force-related storage */
-    sfree( workspace->f, "Deallocate_Workspace_Part2::f" );
-    sfree( workspace->CdDelta, "Deallocate_Workspace_Part2::CdDelta" );
+    sfree( workspace->f, __FILE__, __LINE__ );
+    sfree( workspace->CdDelta, __FILE__, __LINE__ );
 
 #if defined(TEST_FORCES)
-    sfree(workspace->dDelta, "Deallocate_Workspace_Part2::dDelta" );
-    sfree( workspace->f_ele, "Deallocate_Workspace_Part2::f_ele" );
-    sfree( workspace->f_vdw, "Deallocate_Workspace_Part2::f_vdw" );
-    sfree( workspace->f_bo, "Deallocate_Workspace_Part2::f_bo" );
-    sfree( workspace->f_be, "Deallocate_Workspace_Part2::f_be" );
-    sfree( workspace->f_lp, "Deallocate_Workspace_Part2::f_lp" );
-    sfree( workspace->f_ov, "Deallocate_Workspace_Part2::f_ov" );
-    sfree( workspace->f_un, "Deallocate_Workspace_Part2::f_un" );
-    sfree( workspace->f_ang, "Deallocate_Workspace_Part2::f_ang" );
-    sfree( workspace->f_coa, "Deallocate_Workspace_Part2::f_coa" );
-    sfree( workspace->f_pen, "Deallocate_Workspace_Part2::f_pen" );
-    sfree( workspace->f_hb, "Deallocate_Workspace_Part2::f_hb" );
-    sfree( workspace->f_tor, "Deallocate_Workspace_Part2::f_tor" );
-    sfree( workspace->f_con, "Deallocate_Workspace_Part2::f_con" );
-    sfree( workspace->f_tot, "Deallocate_Workspace_Part2::f_tot" );
+    sfree( workspace->dDelta, __FILE__, __LINE__ );
+    sfree( workspace->f_ele, __FILE__, __LINE__ );
+    sfree( workspace->f_vdw, __FILE__, __LINE__ );
+    sfree( workspace->f_bo, __FILE__, __LINE__ );
+    sfree( workspace->f_be, __FILE__, __LINE__ );
+    sfree( workspace->f_lp, __FILE__, __LINE__ );
+    sfree( workspace->f_ov, __FILE__, __LINE__ );
+    sfree( workspace->f_un, __FILE__, __LINE__ );
+    sfree( workspace->f_ang, __FILE__, __LINE__ );
+    sfree( workspace->f_coa, __FILE__, __LINE__ );
+    sfree( workspace->f_pen, __FILE__, __LINE__ );
+    sfree( workspace->f_hb, __FILE__, __LINE__ );
+    sfree( workspace->f_tor, __FILE__, __LINE__ );
+    sfree( workspace->f_con, __FILE__, __LINE__ );
+    sfree( workspace->f_tot, __FILE__, __LINE__ );
 
-    sfree( workspace->rcounts, "Deallocate_Workspace_Part2::rcounts" );
-    sfree( workspace->displs, "Deallocate_Workspace_Part2::displs" );
-    sfree( workspace->id_all, "Deallocate_Workspace_Part2::id_all" );
-    sfree( workspace->f_all, "Deallocate_Workspace_Part2::f_all" );
+    sfree( workspace->rcounts, __FILE__, __LINE__ );
+    sfree( workspace->displs, __FILE__, __LINE__ );
+    sfree( workspace->id_all, __FILE__, __LINE__ );
+    sfree( workspace->f_all, __FILE__, __LINE__ );
 #endif
 }
 
@@ -316,16 +341,16 @@ void Allocate_Workspace_Part1( reax_system * const system, control_params * cons
     /* integrator storage */
     if ( control->ensemble == nhNVT )
     {
-        workspace->v_const = static_cast<rvec*>(smalloc( local_rvec, "Allocate_Workspace_Part1::v_const" ));
+        workspace->v_const = static_cast<rvec*>(smalloc( local_rvec, __FILE__, __LINE__ ));
     }
 
     /* storage for analysis */
     if ( control->molecular_analysis || control->diffusion_coef )
     {
         workspace->mark = static_cast<int*>(scalloc( local_cap, sizeof(int),
-                "Allocate_Workspace_Part1::mark" ));
+                                                     __FILE__, __LINE__ ));
         workspace->old_mark = static_cast<int*>(scalloc( local_cap, sizeof(int),
-                "Allocate_Workspace_Part1::old_mark" ));
+                                                         __FILE__, __LINE__ ));
     }
     else
     {
@@ -336,7 +361,7 @@ void Allocate_Workspace_Part1( reax_system * const system, control_params * cons
     if ( control->diffusion_coef )
     {
         workspace->x_old = static_cast<rvec*>(scalloc( local_cap, sizeof(rvec),
-                "Allocate_Workspace_Part1::x_old" ));
+                                                       __FILE__, __LINE__ ));
     }
     else
     {
@@ -354,24 +379,24 @@ void Allocate_Workspace_Part2( reax_system * const system, control_params * cons
     total_rvec = sizeof(rvec) * total_cap;
 
     /* bond order related storage  */
-    workspace->total_bond_order = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::total_bo" ));
-    workspace->Deltap = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Deltap" ));
-    workspace->Deltap_boc = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Deltap_boc" ));
-    workspace->dDeltap_self = static_cast<rvec*>(smalloc( total_rvec, "Allocate_Workspace_Part2::dDeltap_self" ));
-    workspace->Delta = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Delta" ));
-    workspace->Delta_lp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Delta_lp" ));
-    workspace->Delta_lp_temp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Delta_lp_temp" ));
-    workspace->dDelta_lp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::dDelta_lp" ));
-    workspace->dDelta_lp_temp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::dDelta_lp_temp" ));
-    workspace->Delta_e = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Delta_e" ));
-    workspace->Delta_boc = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Delta_boc" ));
-    workspace->nlp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::nlp" ));
-    workspace->nlp_temp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::nlp_temp" ));
-    workspace->Clp = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::Clp" ));
-    workspace->CdDelta = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::CdDelta" ));
-    workspace->vlpex = static_cast<real*>(smalloc( total_real, "Allocate_Workspace_Part2::vlpex" ));
+    workspace->total_bond_order = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Deltap = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Deltap_boc = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->dDeltap_self = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->Delta = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Delta_lp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Delta_lp_temp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->dDelta_lp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->dDelta_lp_temp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Delta_e = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Delta_boc = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->nlp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->nlp_temp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->Clp = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
+    workspace->CdDelta = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+    workspace->vlpex = static_cast<real*>(smalloc( total_real, __FILE__, __LINE__ ));
     workspace->bond_mark = static_cast<int*>(scalloc( total_cap, sizeof(int),
-            "Allocate_Workspace_Part2::bond_mark" ));
+                                                      __FILE__, __LINE__ ));
 
     /* charge method storage */
     switch ( control->charge_method )
@@ -392,22 +417,22 @@ void Allocate_Workspace_Part2( reax_system * const system, control_params * cons
     }
 
     workspace->b_s = static_cast<real*>(scalloc( total_cap, sizeof(real),
-            "Allocate_Workspace_Part2::b_s" ));
+                                                 __FILE__, __LINE__ ));
     workspace->b_t = static_cast<real*>(scalloc( total_cap, sizeof(real),
-            "Allocate_Workspace_Part2::b_t" ));
+                                                 __FILE__, __LINE__ ));
     workspace->b_prc = static_cast<real*>(scalloc( total_cap, sizeof(real),
-            "Allocate_Workspace_Part2::b_prc" ));
+                                                   __FILE__, __LINE__ ));
     workspace->b_prm = static_cast<real*>(scalloc( total_cap, sizeof(real),
-            "Allocate_Workspace_Part2::b_prm" ));
-    workspace->s = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::s" ));
-    workspace->t = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::t" ));
-    workspace->b = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::b" ));
-    workspace->x = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::x" ));
+                                                   __FILE__, __LINE__ ));
+    workspace->s = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+    workspace->t = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+    workspace->b = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+    workspace->x = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
 
     if ( control->cm_solver_pre_comp_type == JACOBI_PC )
     {
         workspace->Hdia_inv = static_cast<real*>(scalloc( total_cap, sizeof(real),
-                "Allocate_Workspace_Part2::Hdia_inv" ));
+                                                          __FILE__, __LINE__ ));
     }
     if ( control->cm_solver_pre_comp_type == ICHOLT_PC
             || control->cm_solver_pre_comp_type == ILUT_PC
@@ -415,87 +440,115 @@ void Allocate_Workspace_Part2( reax_system * const system, control_params * cons
             || control->cm_solver_pre_comp_type == FG_ILUT_PC )
     {
         workspace->droptol = static_cast<real*>(scalloc( total_cap, sizeof(real),
-                "Allocate_Workspace_Part2::droptol" ));
+                                                         __FILE__, __LINE__ ));
     }
 
     switch ( control->cm_solver_type )
     {
         case GMRES_S:
         case GMRES_H_S:
-            workspace->y = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), "Allocate_Workspace_Part2::y" ));
-            workspace->z = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), "Allocate_Workspace_Part2::z" ));
-            workspace->g = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), "Allocate_Workspace_Part2::g" ));
-            workspace->h = static_cast<real**>(scalloc( SQR(control->cm_solver_restart + 1), sizeof(real*), "Allocate_Workspace_Part2::h"));
-            workspace->hs = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), "Allocate_Workspace_Part2::hs" ));
-            workspace->hc = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), "Allocate_Workspace_Part2::hc" ));
-            workspace->v = static_cast<real**>(scalloc( SQR(control->cm_solver_restart + 1), sizeof(real*), "Allocate_Workspace_Part2::v"));
+            workspace->y = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), __FILE__, __LINE__ ));
+            workspace->z = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), __FILE__, __LINE__ ));
+            workspace->g = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), __FILE__, __LINE__ ));
+            workspace->h = static_cast<real**>(scalloc( SQR(control->cm_solver_restart + 1), sizeof(real*), __FILE__, __LINE__ ));
+            workspace->hs = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), __FILE__, __LINE__ ));
+            workspace->hc = static_cast<real*>(scalloc( control->cm_solver_restart + 1, sizeof(real), __FILE__, __LINE__ ));
+            workspace->v = static_cast<real**>(scalloc( SQR(control->cm_solver_restart + 1), sizeof(real*), __FILE__, __LINE__ ));
             break;
 
         case CG_S:
-            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::r" ));
-            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::d" ));
-            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::q" ));
-            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::p" ));
-            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::r2" ));
-            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::d2" ));
-            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::q2" ));
-            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::p2" ));
+            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+#if defined(DUAL_SOLVER)
+            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+#endif
             break;
 
         case SDM_S:
-            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::r"));
-            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::d" ));
-            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::q" ));
-            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::p" ));
-            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::r2" ));
-            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::d2" ));
-            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::q2" ));
-            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::p2" ));
+            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+#if defined(DUAL_SOLVER)
+            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+#endif
             break;
 
         case BiCGStab_S:
-            workspace->y = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::y" ));
-            workspace->g = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::g" ));
-            workspace->z = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::z" ));
-            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::r" ));
-            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::d" ));
-            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::q" ));
-            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::p" ));
-            workspace->r_hat = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::r_hat" ));
-            workspace->q_hat = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::q_hat" ));
+            workspace->y = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->g = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->z = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->r_hat = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->q_hat = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+#if defined(DUAL_SOLVER)
+            workspace->y2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->g2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->z2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->r_hat2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->q_hat2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+#endif
             break;
 
         case PIPECG_S:
-            workspace->z = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::z" ));
-            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::r" ));
-            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::d" ));
-            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::q" ));
-            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::p" ));
-            workspace->m = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::m" ));
-            workspace->n = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::n" ));
-            workspace->u = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::u" ));
-            workspace->w = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::w" ));
-            workspace->z2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::z2" ));
-            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::r2" ));
-            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::d2" ));
-            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::q2" ));
-            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::p2" ));
-            workspace->m2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::m2" ));
-            workspace->n2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::n2" ));
-            workspace->u2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::u2" ));
-            workspace->w2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), "Allocate_Workspace_Part2::w2" ));
+            workspace->z = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->m = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->n = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->u = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->w = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+#if defined(DUAL_SOLVER)
+            workspace->z2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->m2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->n2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->u2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->w2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+#endif
             break;
 
         case PIPECR_S:
-            workspace->z = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::z" ));
-            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::r" ));
-            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::d" ));
-            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::q" ));
-            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::p" ));
-            workspace->m = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::m" ));
-            workspace->n = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::n" ));
-            workspace->u = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::u" ));
-            workspace->w = static_cast<real*>(scalloc( total_cap, sizeof(real), "Allocate_Workspace_Part2::w" ));
+            workspace->z = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->r = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->d = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->q = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->p = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->m = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->n = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->u = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+            workspace->w = static_cast<real*>(scalloc( total_cap, sizeof(real), __FILE__, __LINE__ ));
+#if defined(DUAL_SOLVER)
+            workspace->z2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->r2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->d2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->q2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->p2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->m2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->n2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->u2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+            workspace->w2 = static_cast<rvec2*>(scalloc( total_cap, sizeof(rvec2), __FILE__, __LINE__ ));
+#endif
             break;
 
         default:
@@ -506,35 +559,35 @@ void Allocate_Workspace_Part2( reax_system * const system, control_params * cons
 
     /* force related storage */
     workspace->f = static_cast<rvec*>(scalloc( total_cap, sizeof(rvec),
-            "Allocate_Workspace_Part2::f" ));
+                                               __FILE__, __LINE__ ));
 
 #if defined(TEST_FORCES)
-    workspace->dDelta = smalloc( total_rvec, "Allocate_Workspace_Part2::dDelta" );
-    workspace->f_ele = smalloc( total_rvec, "Allocate_Workspace_Part2::f_ele" );
-    workspace->f_vdw = smalloc( total_rvec, "Allocate_Workspace_Part2::f_vdw" );
-    workspace->f_bo = smalloc( total_rvec, "Allocate_Workspace_Part2::f_bo" );
-    workspace->f_be = smalloc( total_rvec, "Allocate_Workspace_Part2::f_be" );
-    workspace->f_lp = smalloc( total_rvec, "Allocate_Workspace_Part2::f_lp" );
-    workspace->f_ov = smalloc( total_rvec, "Allocate_Workspace_Part2::f_ov" );
-    workspace->f_un = smalloc( total_rvec, "Allocate_Workspace_Part2::f_un" );
-    workspace->f_ang = smalloc( total_rvec, "Allocate_Workspace_Part2::f_ang" );
-    workspace->f_coa = smalloc( total_rvec, "Allocate_Workspace_Part2::f_coa" );
-    workspace->f_pen = smalloc( total_rvec, "Allocate_Workspace_Part2::f_pen" );
-    workspace->f_hb = smalloc( total_rvec, "Allocate_Workspace_Part2::f_hb" );
-    workspace->f_tor = smalloc( total_rvec, "Allocate_Workspace_Part2::f_tor" );
-    workspace->f_con = smalloc( total_rvec, "Allocate_Workspace_Part2::f_con" );
-    workspace->f_tot = smalloc( total_rvec, "Allocate_Workspace_Part2::f_tot" );
+    workspace->dDelta = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_ele = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_vdw = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_bo = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_be = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_lp = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_ov = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_un = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_ang = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_coa = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_pen = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_hb = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_tor = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_con = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
+    workspace->f_tot = static_cast<rvec*>(smalloc( total_rvec, __FILE__, __LINE__ ));
 
     if ( system->my_rank == MASTER_NODE )
     {
-        workspace->rcounts = smalloc( sizeof(int) * system->nprocs,
-                "Allocate_Workspace_Part2::rcounts" );
-        workspace->displs = smalloc( sizeof(int) * system->nprocs,
-                "Allocate_Workspace_Part2::displs" );
-        workspace->id_all = smalloc( sizeof(int) * system->bigN,
-                "Allocate_Workspace_Part2::id_all" );
-        workspace->f_all = smalloc( sizeof(rvec) * system->bigN,
-                "Allocate_Workspace_Part2::f_all" );
+        workspace->rcounts = static_cast<int*>(smalloc( sizeof(int) * system->nprocs,
+                                                        __FILE__, __LINE__ ));
+        workspace->displs = static_cast<int*>(smalloc( sizeof(int) * system->nprocs,
+                                                       __FILE__, __LINE__ ));
+        workspace->id_all = static_cast<int*>(smalloc( sizeof(int) * system->bigN,
+                                                       __FILE__, __LINE__ ));
+        workspace->f_all = static_cast<rvec*>(smalloc( sizeof(rvec) * system->bigN,
+                                                       __FILE__, __LINE__ ));
     }
     else
     {
@@ -576,10 +629,10 @@ void Allocate_Matrix( sparse_matrix * const H, int n, int n_max, int m,
     H->m = m;
     H->format = format;
 
-    H->start = static_cast<int*>(smalloc( sizeof(int) * n_max, "Allocate_Matrix::start" ));
-    H->end = static_cast<int*>(smalloc( sizeof(int) * n_max, "Allocate_Matrix::end" ));
-    H->j = static_cast<int*>(smalloc( sizeof(int) * m, "Allocate_Matrix::j" ));
-    H->val = static_cast<real*>(smalloc( sizeof(real) * m, "Allocate_Matrix::val" ));
+    H->start = static_cast<int*>(smalloc( sizeof(int) * n_max, __FILE__, __LINE__ ));
+    H->end = static_cast<int*>(smalloc( sizeof(int) * n_max, __FILE__, __LINE__ ));
+    H->j = static_cast<int*>(smalloc( sizeof(int) * m, __FILE__, __LINE__ ));
+    H->val = static_cast<real*>(smalloc( sizeof(real) * m, __FILE__, __LINE__ ));
 }
 
 
@@ -590,10 +643,10 @@ void Deallocate_Matrix( sparse_matrix * const H )
     H->n_max = 0;
     H->m = 0;
 
-    sfree( H->start, "Deallocate_Matrix::start" );
-    sfree( H->end, "Deallocate_Matrix::end" );
-    sfree( H->j, "Deallocate_Matrix::j" );
-    sfree( H->val, "Deallocate_Matrix::val" );
+    sfree( H->start, __FILE__, __LINE__ );
+    sfree( H->end, __FILE__, __LINE__ );
+    sfree( H->j, __FILE__, __LINE__ );
+    sfree( H->val, __FILE__, __LINE__ );
 }
 
 
@@ -710,13 +763,13 @@ void Allocate_Grid( reax_system * const system, MPI_Comm comm )
     total = g->ncells[0] * g->ncells[1] * g->ncells[2];
 
     /* allocate gcell reordering space */
-    g->order = static_cast<ivec*>(scalloc( g->total + 1, sizeof(ivec), "Allocate_Grid::g->order" ));
+    g->order = static_cast<ivec*>(scalloc( g->total + 1, sizeof(ivec), __FILE__, __LINE__ ));
 
     /* allocate the gcells for the new grid */
     g->max_nbrs = (2 * g->vlist_span[0] + 1) * (2 * g->vlist_span[1] + 1)
         * (2 * g->vlist_span[2] + 1) + 3;
 
-    g->cells = static_cast<grid_cell*>(scalloc( total, sizeof(grid_cell), "Allocate_Grid::g->cells" ));
+    g->cells = static_cast<grid_cell*>(scalloc( total, sizeof(grid_cell), __FILE__, __LINE__ ));
 
     for ( i = 0; i < total; i++ )
     {
@@ -725,11 +778,11 @@ void Allocate_Grid( reax_system * const system, MPI_Comm comm )
         gc->mark = 0;
     }
 
-    g->str = static_cast<int*>(scalloc( total, sizeof(int),"Allocate_Grid::grid->str" ));
-    g->end = static_cast<int*>(scalloc( total, sizeof(int), "Allocate_Grid::grid->end" ));
-    g->cutoff = static_cast<real*>(scalloc( total, sizeof(real), "Allocate_Grid::grid->cutoff" ));
-    g->nbrs_x = static_cast<ivec*>(scalloc( total * g->max_nbrs, sizeof(ivec), "Allocate_Grid::grid->nbrs_x" ));
-    g->nbrs_cp = static_cast<rvec*>(scalloc( total * g->max_nbrs, sizeof(rvec), "Allocate_Grid::grid->nbrs_cp" ));
+    g->str = static_cast<int*>(scalloc( total, sizeof(int),__FILE__, __LINE__ ));
+    g->end = static_cast<int*>(scalloc( total, sizeof(int), __FILE__, __LINE__ ));
+    g->cutoff = static_cast<real*>(scalloc( total, sizeof(real), __FILE__, __LINE__ ));
+    g->nbrs_x = static_cast<ivec*>(scalloc( total * g->max_nbrs, sizeof(ivec), __FILE__, __LINE__ ));
+    g->nbrs_cp = static_cast<rvec*>(scalloc( total * g->max_nbrs, sizeof(rvec), __FILE__, __LINE__ ));
 
     for ( i = 0; i < total * g->max_nbrs; i++ )
     {
@@ -737,7 +790,7 @@ void Allocate_Grid( reax_system * const system, MPI_Comm comm )
         g->nbrs_x[i][1] = -1;
         g->nbrs_x[i][2] = -1;
     }
-    g->rel_box = static_cast<ivec*>(scalloc( total, sizeof(ivec), "Allocate_Grid::grid->rel_box" ));
+    g->rel_box = static_cast<ivec*>(scalloc( total, sizeof(ivec), __FILE__, __LINE__ ));
 
     /* allocate atom id storage in gcells */
     g->max_atoms = Estimate_GCell_Population( system, comm );
@@ -751,7 +804,7 @@ void Allocate_Grid( reax_system * const system, MPI_Comm comm )
             {
                 g->cells[ index_grid_3d(i, j, k, g) ].atoms =
                    static_cast<int*>(scalloc( g->max_atoms, sizeof(int),
-                            "Allocate_Grid::g->cells[ ].atoms" ));
+                                              __FILE__, __LINE__ ));
             }
         }
     }
@@ -763,13 +816,13 @@ void Deallocate_Grid( grid * const g )
     int i, j, k;
     grid_cell *gc;
 
-    sfree( g->order, "Deallocate_Grid::g->order" );
-    sfree( g->str, "Deallocate_Grid::g->str" );
-    sfree( g->end, "Deallocate_Grid::g->end" );
-    sfree( g->cutoff, "Deallocate_Grid::g->cutoff" );
-    sfree( g->nbrs_x, "Deallocate_Grid::g->nbrs_x" );
-    sfree( g->nbrs_cp, "Deallocate_Grid::g->nbrs_cp" );
-    sfree( g->rel_box, "Deallocate_Grid::g->rel_box" );
+    sfree( g->order, __FILE__, __LINE__ );
+    sfree( g->str, __FILE__, __LINE__ );
+    sfree( g->end, __FILE__, __LINE__ );
+    sfree( g->cutoff, __FILE__, __LINE__ );
+    sfree( g->nbrs_x, __FILE__, __LINE__ );
+    sfree( g->nbrs_cp, __FILE__, __LINE__ );
+    sfree( g->rel_box, __FILE__, __LINE__ );
 
     /* deallocate the grid cells */
     for ( i = 0; i < g->ncells[0]; i++ )
@@ -781,12 +834,12 @@ void Deallocate_Grid( grid * const g )
                 gc = &g->cells[ index_grid_3d(i, j, k, g)] ;
                 if ( gc->atoms != NULL )
                 {
-                    sfree( gc->atoms, "Deallocate_Grid::g->cells[ ].atoms" );
+                    sfree( gc->atoms, __FILE__, __LINE__ );
                 }
             }
         }
     }
-    sfree( g->cells, "Deallocate_Grid::g->cells" );
+    sfree( g->cells, __FILE__, __LINE__ );
 }
 
 
@@ -795,9 +848,9 @@ void Deallocate_MPI_Buffers( mpi_datatypes * const mpi_data )
     int i;
     mpi_out_data *mpi_buf;
 
-    sfree( mpi_data->in1_buffer, "Deallocate_MPI_Buffers::in1_buffer" );
+    sfree( mpi_data->in1_buffer, __FILE__, __LINE__ );
     mpi_data->in1_buffer_size = 0;
-    sfree( mpi_data->in2_buffer, "Deallocate_MPI_Buffers::in2_buffer" );
+    sfree( mpi_data->in2_buffer, __FILE__, __LINE__ );
     mpi_data->in2_buffer_size = 0;
 
     for ( i = 0; i < MAX_NBRS; ++i )
@@ -805,22 +858,22 @@ void Deallocate_MPI_Buffers( mpi_datatypes * const mpi_data )
         mpi_buf = &mpi_data->out_buffers[i];
 
         mpi_buf->cnt = 0;
-        sfree( mpi_buf->index, "Deallocate_MPI_Buffers::mpi_buf->index" );
+        sfree( mpi_buf->index, __FILE__, __LINE__ );
         mpi_buf->index_size = 0;
-        sfree( mpi_buf->out_atoms, "Deallocate_MPI_Buffers::mpi_buf->out_atoms" );
+        sfree( mpi_buf->out_atoms, __FILE__, __LINE__ );
         mpi_buf->out_atoms_size = 0;
     }
 
 #if defined(NEUTRAL_TERRITORY)
     for ( i = 0; i < MAX_NT_NBRS; ++i )
     {
-        sfree( mpi_data->in_nt_buffer[i], "Deallocate_MPI_Buffers::in_nt_buffer" );
+        sfree( mpi_data->in_nt_buffer[i], __FILE__, __LINE__ );
 
         mpi_buf = &mpi_data->out_nt_buffers[i];
         mpi_buf->cnt = 0;
-        sfree( mpi_buf->index, "Deallocate_MPI_Buffers::nt_index" );
+        sfree( mpi_buf->index, __FILE__, __LINE__ );
         mpi_buf->index_size = 0;
-        sfree( mpi_buf->out_atoms, "Deallocate_MPI_Buffers::nt_out_atoms" );
+        sfree( mpi_buf->out_atoms, __FILE__, __LINE__ );
         mpi_buf->out_atoms_size = 0;
     }
 #endif
@@ -847,9 +900,9 @@ void Reallocate_Part1( reax_system * const system, control_params * const contro
                 for ( k = g->native_str[2]; k < g->native_end[2]; k++ )
                 {
                     sfree( g->cells[ index_grid_3d(i, j, k, g) ].atoms,
-                            "Reallocate_Part1::g->cells[ ].atoms" );
+                            __FILE__, __LINE__ );
                     g->cells[ index_grid_3d(i, j, k, g) ].atoms = static_cast<int*>(scalloc( realloc->gcell_atoms,
-                            sizeof(int), "Reallocate_Part1::g->cells[ ].atoms" ));
+                            sizeof(int), __FILE__, __LINE__ ));
                 }
             }
         }

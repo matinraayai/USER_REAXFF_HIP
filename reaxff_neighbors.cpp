@@ -18,15 +18,23 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
+#if defined(LAMMPS_REAX)
+    #include "reaxff_neighbors.h"
 
-#include "reaxff_neighbors.h"
+    #include "reaxff_index_utils.h"
+    #include "reaxff_io_tools.h"
+    #include "reaxff_list.h"
+    #include "reaxff_tool_box.h"
+    #include "reaxff_vector.h"
+#else
+    #include "neighbors.h"
 
-#include "reaxff_hip_index_utils.h"
-#include "reaxff_io_tools.h"
-#include "reaxff_list.h"
-#include "reaxff_tool_box.h"
-#include "reaxff_vector.h"
-
+    #include "index_utils.h"
+    #include "io_tools.h"
+    #include "list.h"
+    #include "tool_box.h"
+    #include "vector.h"
+#endif
 
 #if defined(TEST_ENERGY) || defined(TEST_FORCES)
 int compare_far_nbrs( const void *p1, const void *p2 )

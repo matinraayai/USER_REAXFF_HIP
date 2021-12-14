@@ -22,7 +22,11 @@
 #ifndef __RESTART_H_
 #define __RESTART_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+#else
+    #include "reax_types.h"
+#endif
 
 
 #define RESTART_HEADER "%8d%12d%8.3f%8.3f%8.3f%8.3f%8.3f\n%15.5f%15.5f%15.5f\n%15.5f%15.5f%15.5f\n%15.5f%15.5f%15.5f\n"

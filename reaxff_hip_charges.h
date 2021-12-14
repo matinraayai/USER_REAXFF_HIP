@@ -19,13 +19,13 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_CHARGES_H_
-#define __CUDA_CHARGES_H_
+#ifndef __HIP_CHARGES_H_
+#define __HIP_CHARGES_H_
 
-#if defined(PURE_REAX)
-    #include "../reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
 
 

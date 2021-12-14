@@ -22,11 +22,7 @@
 #ifndef __ALLOCATE_H_
 #define __ALLOCATE_H_
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
-    #include "reaxff_types.h"
-#endif
+#include "reax_types.h"
 
 
 #ifdef __cplusplus

@@ -19,21 +19,7 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#if defined(PURE_REAX)
-    #include "integrate.h"
-
-    #include "allocate.h"
-    #include "box.h"
-    #include "comm_tools.h"
-    #include "forces.h"
-    #include "grid.h"
-    #include "io_tools.h"
-    #include "neighbors.h"
-    #include "reset_tools.h"
-    #include "system_props.h"
-    #include "tool_box.h"
-    #include "vector.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_integrate.h"
 
     #include "reaxff_allocate.h"
@@ -47,6 +33,20 @@
     #include "reaxff_system_props.h"
     #include "reaxff_tool_box.h"
     #include "reaxff_vector.h"
+#else
+    #include "integrate.h"
+
+    #include "allocate.h"
+    #include "box.h"
+    #include "comm_tools.h"
+    #include "forces.h"
+    #include "grid.h"
+    #include "io_tools.h"
+    #include "neighbors.h"
+    #include "reset_tools.h"
+    #include "system_props.h"
+    #include "tool_box.h"
+    #include "vector.h"
 #endif
 
 /* Velocity Verlet integrator for microcanonical ensemble. */

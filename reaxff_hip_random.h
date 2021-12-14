@@ -19,10 +19,14 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_RANDOM_H_
-#define __CUDA_RANDOM_H_
+#ifndef __HIP_RANDOM_H_
+#define __HIP_RANDOM_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
+#endif
 
 
 /* System random number generator used linear congruance method with

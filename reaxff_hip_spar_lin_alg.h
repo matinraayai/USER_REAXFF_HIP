@@ -19,64 +19,65 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_LIN_ALG_H_
-#define __CUDA_LIN_ALG_H_
+#ifndef __HIP_LIN_ALG_H_
+#define __HIP_LIN_ALG_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
+#endif
 
 
 int Hip_dual_SDM( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, rvec2 const * const, real,
-        rvec2 * const, mpi_datatypes * const );
+        rvec2 * const, mpi_datatypes * const, int );
 
 int Hip_SDM( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, real const * const, real,
-        real * const, mpi_datatypes * const );
+        real * const, mpi_datatypes * const, int );
 
 int Hip_dual_CG( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, rvec2 const * const, real,
-        rvec2 * const, mpi_datatypes * const );
+        rvec2 * const, mpi_datatypes * const, int );
 
 int Hip_CG( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, real const * const, real,
-        real * const, mpi_datatypes * const );
+        real * const, mpi_datatypes * const, int );
 
 int Hip_dual_BiCGStab( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, rvec2 const * const, real,
-        rvec2 * const, mpi_datatypes * const );
+        rvec2 * const, mpi_datatypes * const, int );
 
 int Hip_BiCGStab( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, real const * const, real,
-        real * const, mpi_datatypes * const );
+        real * const, mpi_datatypes * const, int );
 
 int Hip_dual_PIPECG( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, rvec2 const * const, real,
-        rvec2 * const, mpi_datatypes * const );
+        rvec2 * const, mpi_datatypes * const, int );
 
 int Hip_PIPECG( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, real const * const, real,
-        real * const, mpi_datatypes * const );
+        real * const, mpi_datatypes * const, int );
 
 int Hip_dual_PIPECR( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, rvec2 const * const, real,
-        rvec2 * const, mpi_datatypes * const );
+        rvec2 * const, mpi_datatypes * const, int );
 
 int Hip_PIPECR( reax_system const * const, control_params const * const,
         simulation_data * const, storage * const,
         sparse_matrix const * const, real const * const, real,
-        real * const, mpi_datatypes * const );
+        real * const, mpi_datatypes * const, int );
 
-void Sparse_MatVec_local( control_params const * const control,
-                                 sparse_matrix const * const A, real const * const x,
-                                 real * const b, int n );
 
 #endif

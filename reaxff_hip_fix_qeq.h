@@ -14,7 +14,7 @@ void  HipInitStorageForFixQeq(fix_qeq_gpu *qeq_gpu, double *Hdia_inv, double *b_
 void  Hip_Calculate_H_Matrix(reax_list **gpu_lists,  reax_system *system,fix_qeq_gpu *qeq_gpu, control_params *control, int inum);
 void  Hip_Init_Taper(fix_qeq_gpu *qeq_gpu,double *Tap, int numTap);
 void  Hip_Init_Fix_Atoms(reax_system *system,fix_qeq_gpu *qeq_gpu);
-void  Hip_Init_Matvec_Fix(int nn, fix_qeq_gpu *qeq_gpu, reax_system *system);
+void  Hip_Init_MatVec_Fix(int n, fix_qeq_gpu *qeq_gpu, reax_system *system);
 void  Hip_Copy_Pertype_Parameters_To_Device(double *chi,double *eta,double *gamma,int ntypes,fix_qeq_gpu *qeq_gpu);
 void Hip_Copy_From_Device_Comm_Fix(double *buf, double *x, int n, int offset);
 void Hip_Copy_To_Device_Comm_Fix(double *buf, double *x, int n, int offset);

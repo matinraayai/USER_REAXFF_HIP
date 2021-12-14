@@ -19,8 +19,11 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#include "reaxff_hip_utils.h"
-#include "reaxff_hip_list.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_utils.h"
+#else
+    #include "hip_utils.h"
+#endif
 
 
 /* Allocate space for interaction list
@@ -45,44 +48,36 @@ extern "C" void Hip_Make_List( int n, int max_intrs, int type, reax_list * const
     l->type = type;
 //    l->format = format;
 
-    hip_malloc( (void **) &l->index, sizeof(int) * n,
-            TRUE, "Hip_Make_List::index" );
-    hip_malloc( (void **) &l->end_index, sizeof(int) * n,
-            TRUE, "Hip_Make_List::end_index" );
+    sHipMalloc( (void **) &l->index, sizeof(int) * n, __FILE__, __LINE__ );
+    sHipMalloc( (void **) &l->end_index, sizeof(int) * n, __FILE__, __LINE__ );
 
     switch ( l->type )
     {
         case TYP_FAR_NEIGHBOR:
-            hip_malloc( (void **) &l->far_nbr_list.nbr,
-                    sizeof(int) * l->max_intrs, TRUE,
-                    "Hip_Make_List::far_nbr_list.nbr" );
-            hip_malloc( (void **) &l->far_nbr_list.rel_box,
-                    sizeof(ivec) * l->max_intrs, TRUE,
-                    "Hip_Make_List::far_nbr_list.rel_box" );
-            hip_malloc( (void **) &l->far_nbr_list.d,
-                    sizeof(real) * l->max_intrs, TRUE,
-                    "Hip_Make_List::far_nbr_list.d" );
-            hip_malloc( (void **) &l->far_nbr_list.dvec,
-                    sizeof(rvec) * l->max_intrs, TRUE,
-                    "Hip_Make_List::far_nbr_list.dvec" );
+            sHipMalloc( (void **) &l->far_nbr_list.nbr,
+                    sizeof(int) * l->max_intrs, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &l->far_nbr_list.rel_box,
+                    sizeof(ivec) * l->max_intrs, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &l->far_nbr_list.d,
+                    sizeof(real) * l->max_intrs, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &l->far_nbr_list.dvec,
+                    sizeof(rvec) * l->max_intrs, __FILE__, __LINE__ );
             break;
 
         case TYP_BOND:
-            hip_malloc( (void **) &l->bond_list,
-                    sizeof(bond_data) * l->max_intrs, TRUE,
-                    "Hip_Make_List::bonds" );
+            sHipMalloc( (void **) &l->bond_list,
+                    sizeof(bond_data) * l->max_intrs, __FILE__, __LINE__ );
             break;
 
         case TYP_HBOND:
-            hip_malloc( (void **) &l->hbond_list,
-                    sizeof(hbond_data) * l->max_intrs, TRUE,
-                    "Hip_Make_List::hbonds" );
+            sHipMalloc( (void **) &l->hbond_list,
+                    sizeof(hbond_data) * l->max_intrs, __FILE__, __LINE__ );
             break;            
 
         case TYP_THREE_BODY:
-            hip_malloc( (void **) &l->three_body_list,
-                    sizeof(three_body_interaction_data) * l->max_intrs, TRUE,
-                    "Hip_Make_List::three_bodies" );
+            sHipMalloc( (void **) &l->three_body_list,
+                    sizeof(three_body_interaction_data) * l->max_intrs,
+                    __FILE__, __LINE__ );
             break;
 
         default:
@@ -91,63 +86,6 @@ extern "C" void Hip_Make_List( int n, int max_intrs, int type, reax_list * const
             break;
     }
 }
-
-
-void Hip_Copy_Far_Neighbors_List_Host_to_Device(reax_system *system, reax_list **gpu_lists, reax_list *cpu_lists) {
-    // Check if both lists are allocated
-//    if (gpu_lists[FAR_NBRS]->allocated & (cpu_lists+FAR_NBRS)->allocated) {
-//        fprintf( stderr, "[ERROR] One or Two of the lists were not allocated.\n"
-//                         "GPU List allocation: %d, CPU List allocation: %d", gpu_lists[FAR_NBRS]->allocated,
-//                         (cpu_lists+FAR_NBRS)->allocated);
-//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
-//    }
-//    // Check if they're the same type
-//    if (gpu_lists[FAR_NBRS]->type == (cpu_lists+FAR_NBRS)->type) {
-//        fprintf( stderr, "[ERROR] The lists don't have the same type.\n"
-//                         "GPU List type: %d, CPU List type: %d", gpu_lists[FAR_NBRS]->type,
-//                         (cpu_lists+FAR_NBRS)->type);
-//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
-//    }
-//    // Check if they're the same size
-//    if (gpu_lists[FAR_NBRS]->n == (cpu_lists+FAR_NBRS)->n) {
-//        fprintf( stderr, "[ERROR] The lists are not of the same size.\n"
-//                         "GPU List size: %d, CPU List size: %d", gpu_lists[FAR_NBRS]->n,
-//                         (cpu_lists+FAR_NBRS)->n);
-//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
-//    }
-//    // Check if they have the same capacity
-//    if (gpu_lists[FAR_NBRS]->max_intrs == (cpu_lists+FAR_NBRS)->max_intrs) {
-//        fprintf( stderr, "[ERROR] The lists don't have the same max size.\n"
-//                         "GPU List max size: %d, CPU List max size: %d", gpu_lists[FAR_NBRS]->max_intrs,
-//                         (cpu_lists+FAR_NBRS)->max_intrs);
-//        MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
-//    }
-    sHipMemcpy((cpu_lists+FAR_NBRS)->index, gpu_lists[FAR_NBRS]->index,
-               system->total_cap * sizeof(int),
-               hipMemcpyHostToDevice, __FILE__,
-               __LINE__);
-    sHipMemcpy( (cpu_lists+FAR_NBRS)->end_index, gpu_lists[FAR_NBRS]->end_index,
-                system->total_cap * sizeof(int),
-                hipMemcpyHostToDevice, __FILE__,
-                __LINE__);
-    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.nbr, gpu_lists[FAR_NBRS]->far_nbr_list.nbr,
-                system->total_far_nbrs * sizeof(int),
-                hipMemcpyHostToDevice, __FILE__,
-                __LINE__);
-    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.rel_box, gpu_lists[FAR_NBRS]->far_nbr_list.rel_box,
-                system->total_far_nbrs * sizeof(ivec),
-                hipMemcpyHostToDevice, __FILE__,
-                __LINE__);
-    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.d, gpu_lists[FAR_NBRS]->far_nbr_list.d,
-                system->total_far_nbrs * sizeof(real),
-                hipMemcpyHostToDevice, __FILE__,
-                __LINE__);
-    sHipMemcpy( (cpu_lists+FAR_NBRS)->far_nbr_list.dvec, gpu_lists[FAR_NBRS]->far_nbr_list.dvec,
-                system->total_far_nbrs * sizeof(rvec),
-                hipMemcpyHostToDevice, __FILE__,
-                __LINE__);
-};
-
 
 
 extern "C" void Hip_Delete_List( reax_list *l )
@@ -163,39 +101,33 @@ extern "C" void Hip_Delete_List( reax_list *l )
     l->n = 0;
     l->max_intrs = 0;
 
-    hip_free( l->index, "Hip_Delete_List::index" );
-    hip_free( l->end_index, "Hip_Delete_List::end_index" );
+    sHipFree( l->index, __FILE__, __LINE__ );
+    sHipFree( l->end_index, __FILE__, __LINE__ );
 
     switch ( l->type )
     {
         case TYP_FAR_NEIGHBOR:
-            hip_free( l->far_nbr_list.nbr, "Hip_Delete_List::far_nbr_list.nbr" );
-            hip_free( l->far_nbr_list.rel_box, "Hip_Delete_List::far_nbr_list.rel_box" );
-            hip_free( l->far_nbr_list.d, "Hip_Delete_List::far_nbr_list.d" );
-            hip_free( l->far_nbr_list.dvec, "Hip_Delete_List::far_nbr_list.dvec" );
+            sHipFree( l->far_nbr_list.nbr, __FILE__, __LINE__ );
+            sHipFree( l->far_nbr_list.rel_box, __FILE__, __LINE__ );
+            sHipFree( l->far_nbr_list.d, __FILE__, __LINE__ );
+            sHipFree( l->far_nbr_list.dvec, __FILE__, __LINE__ );
             break;
 
         case TYP_BOND:
-            hip_free( l->bond_list, "Hip_Delete_List::bonds" );
+            sHipFree( l->bond_list, __FILE__, __LINE__ );
             break;
 
         case TYP_HBOND:
-            hip_free( l->hbond_list, "Hip_Delete_List::hbonds" );
+            sHipFree( l->hbond_list, __FILE__, __LINE__ );
             break;
 
         case TYP_THREE_BODY:
-            hip_free( l->three_body_list, "Hip_Delete_List::three_bodies" );
+            sHipFree( l->three_body_list, __FILE__, __LINE__ );
             break;
 
         default:
             fprintf( stderr, "[ERROR] unknown devive list type (%d)\n", l->type );
             MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
             break;
-    }
-}
-
-extern "C" void Hip_Adjust_End_Index_Before_ReAllocation(int oldN, int systemN, reax_list **gpu_lists) {
-    for(int k = oldN; k < systemN; ++k) {
-        Hip_Set_End_Index( k, Hip_Start_Index( k, gpu_lists[BONDS] ), gpu_lists[BONDS] );
     }
 }

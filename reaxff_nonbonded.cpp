@@ -19,12 +19,9 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#include "reaxff_types.h"
-
-
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
 
 #if defined(PURE_REAX)
@@ -272,7 +269,10 @@ void vdW_Coulomb_Energy( reax_system const * const system,
              data->ext_press[0], data->ext_press[1], data->ext_press[2] );
 #endif
 
-    Compute_Polarization_Energy( system, data );
+    if ( control->polarization_energy_enabled == TRUE )
+    {
+        Compute_Polarization_Energy( system, data );
+    }
 }
 
 
@@ -392,7 +392,10 @@ void Tabulated_vdW_Coulomb_Energy( reax_system const * const system,
         }
     }
 
-    Compute_Polarization_Energy( system, data );
+    if ( control->polarization_energy_enabled == TRUE )
+    {
+        Compute_Polarization_Energy( system, data );
+    }
 }
 
 

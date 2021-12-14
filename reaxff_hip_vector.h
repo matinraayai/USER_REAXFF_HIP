@@ -22,9 +22,9 @@
 #ifndef __CUDA_VECTOR_H_
 #define __CUDA_VECTOR_H_
 
-#include "reaxff_types.h"
+#include "../reax_types.h"
 
-#include "reaxff_hip_random.h"
+#include "hip_random.h"
 
 
 HIP_DEVICE static inline void hip_rvec_Random( rvec v )

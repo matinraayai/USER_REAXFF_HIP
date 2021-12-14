@@ -19,7 +19,11 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#include "reaxff_hip_random.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_random.h"
+#else
+    #include "hip_random.h"
+#endif
 
 
 /* System random number generator used linear congruance method with

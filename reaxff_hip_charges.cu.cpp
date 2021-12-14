@@ -19,32 +19,48 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
-#if defined(PURE_REAX)
-    #include "hip_charges.h"
 
-    #include "hip_reduction.h"
-    #include "hip_spar_lin_alg.h"
-    #include "hip_utils.h"
-
-    #include "../basic_comm.h"
-    #include "../charges.h"
-    #include "../comm_tools.h"
-    #include "../tool_box.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_charges.h"
 
+    #include "reaxff_hip_allocate.h"
+    #include "reaxff_hip_copy.h"
     #include "reaxff_hip_reduction.h"
     #include "reaxff_hip_spar_lin_alg.h"
     #include "reaxff_hip_utils.h"
 
-    #include "reaxff_basic_comm.h"
+    #include "reaxff_allocate.h"
     #include "reaxff_charges.h"
     #include "reaxff_comm_tools.h"
+    #include "reaxff_lin_alg.h"
     #include "reaxff_tool_box.h"
+    #if !defined(MPIX_CUDA_AWARE_SUPPORT) || !MPIX_CUDA_AWARE_SUPPORT
+      #include "reaxff_basic_comm.h"
+    #else
+      #include "reaxff_hip_basic_comm.h"
+    #endif
+#else
+    #include "hip_charges.h"
+
+    #include "hip_allocate.h"
+    #include "hip_copy.h"
+    #include "hip_reduction.h"
+    #include "hip_spar_lin_alg.h"
+    #include "hip_utils.h"
+
+    #include "../allocate.h"
+    #include "../charges.h"
+    #include "../comm_tools.h"
+    #include "../lin_alg.h"
+    #include "../tool_box.h"
+    #if !defined(MPIX_CUDA_AWARE_SUPPORT) || !MPIX_CUDA_AWARE_SUPPORT
+      #include "../basic_comm.h"
+    #else
+      #include "hip_basic_comm.h"
+    #endif
 #endif
 
 #include <hipcub/hipcub.hpp>
-
 
 
 //TODO: move k_jacob and jacboi to hip_lin_alg.cu
@@ -67,14 +83,15 @@ HIP_GLOBAL void k_jacobi( reax_atom const * const my_atoms,
 
 
 static void jacobi( reax_system const * const system,
-        storage const * const workspace )
+        control_params const * const control, storage const * const workspace )
 {
     int blocks;
 
     blocks = system->n / DEF_BLOCK_SIZE
         + ((system->n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_jacobi, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, 
+    k_jacobi <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[4] >>>
+        ( system->d_my_atoms, system->reax_param.d_sbp,
           *(workspace->d_workspace), system->n );
     hipCheckError( );
 }
@@ -85,7 +102,8 @@ static void jacobi( reax_system const * const system,
  *
  * A: sparse matrix for which to sort nonzeros within a row, stored in CSR format
  */
-void Sort_Matrix_Rows( sparse_matrix * const A, reax_system const * const system )
+void Sort_Matrix_Rows( sparse_matrix * const A, reax_system const * const system,
+       control_params const * const control )
 {
     int i, num_entries, *start, *end, *d_j_temp;
     real *d_val_temp;
@@ -97,22 +115,24 @@ void Sort_Matrix_Rows( sparse_matrix * const A, reax_system const * const system
     max_temp_storage_bytes = 0;
 
     /* copy row indices from device */
-    start = (int *) smalloc( sizeof(int) * system->total_cap, "Sort_Matrix_Rows::start" );
-    end = (int *) smalloc( sizeof(int) * system->total_cap, "Sort_Matrix_Rows::end" );
-    sHipMemcpy( start, A->start, sizeof(int) * system->total_cap,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
-    sHipMemcpy( end, A->end, sizeof(int) * system->total_cap,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    start = (int *) smalloc( sizeof(int) * system->total_cap, __FILE__, __LINE__ );
+    end = (int *) smalloc( sizeof(int) * system->total_cap, __FILE__, __LINE__ );
+    sHipMemcpyAsync( start, A->start, sizeof(int) * system->total_cap,
+            hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+    sHipMemcpyAsync( end, A->end, sizeof(int) * system->total_cap,
+            hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
 
     /* make copies of column indices and non-zero values */
-    hip_malloc( (void **) &d_j_temp, sizeof(int) * system->total_cm_entries,
-            FALSE, "Sort_Matrix_Rows::d_j_temp" );
-    hip_malloc( (void **) &d_val_temp, sizeof(real) * system->total_cm_entries,
-            FALSE, "Sort_Matrix_Rows::d_val_temp" );
-    sHipMemcpy( d_j_temp, A->j, sizeof(int) * system->total_cm_entries,
-            hipMemcpyDeviceToDevice, __FILE__, __LINE__ );
-    sHipMemcpy( d_val_temp, A->val, sizeof(real) * system->total_cm_entries,
-            hipMemcpyDeviceToDevice, __FILE__, __LINE__ );
+    sHipMalloc( (void **) &d_j_temp, sizeof(int) * system->total_cm_entries,
+            __FILE__, __LINE__ );
+    sHipMalloc( (void **) &d_val_temp, sizeof(real) * system->total_cm_entries,
+            __FILE__, __LINE__ );
+    sHipMemcpyAsync( d_j_temp, A->j, sizeof(int) * system->total_cm_entries,
+            hipMemcpyDeviceToDevice, control->streams[4], __FILE__, __LINE__ );
+    sHipMemcpyAsync( d_val_temp, A->val, sizeof(real) * system->total_cm_entries,
+            hipMemcpyDeviceToDevice, control->streams[4], __FILE__, __LINE__ );
+
+    hipStreamSynchronize( control->streams[4] );
 
     for ( i = 0; i < system->n; ++i )
     {
@@ -126,17 +146,17 @@ void Sort_Matrix_Rows( sparse_matrix * const A, reax_system const * const system
         if ( d_temp_storage == NULL )
         {
             /* allocate temporary storage */
-            hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-                    "Sort_Matrix_Rows::d_temp_storage" );
+            sHipMalloc( &d_temp_storage, temp_storage_bytes,
+                    __FILE__, __LINE__ );
         }
         else if ( max_temp_storage_bytes < temp_storage_bytes )
         {
             /* deallocate temporary storage */
-            hip_free( d_temp_storage, "Sort_Matrix_Rows::d_temp_storage" );
+            sHipFree( d_temp_storage, __FILE__, __LINE__ );
 
             /* allocate temporary storage */
-            hip_malloc( &d_temp_storage, temp_storage_bytes, FALSE,
-                    "Sort_Matrix_Rows::d_temp_storage" );
+            sHipMalloc( &d_temp_storage, temp_storage_bytes,
+                    __FILE__, __LINE__ );
 
             max_temp_storage_bytes = temp_storage_bytes;
         }
@@ -149,11 +169,11 @@ void Sort_Matrix_Rows( sparse_matrix * const A, reax_system const * const system
     }
 
     /* deallocate temporary storage */
-    hip_free( d_temp_storage, "Sort_Matrix_Rows::d_temp_storage" );
-    hip_free( d_j_temp, "Sort_Matrix_Rows::d_j_temp" );
-    hip_free( d_val_temp, "Sort_Matrix_Rows::d_val_temp" );
-    sfree( start, "Sort_Matrix_Rows::start" );
-    sfree( end, "Sort_Matrix_Rows::end" );
+    sHipFree( d_temp_storage, __FILE__, __LINE__ );
+    sHipFree( d_j_temp, __FILE__, __LINE__ );
+    sHipFree( d_val_temp, __FILE__, __LINE__ );
+    sfree( start, __FILE__, __LINE__ );
+    sfree( end, __FILE__, __LINE__ );
 }
 
 
@@ -252,7 +272,9 @@ static void Spline_Extrapolate_Charges_QEq( reax_system const * const system,
     blocks = system->n / DEF_BLOCK_SIZE
         + ((system->n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_spline_extrapolate_charges_qeq, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, 
+    k_spline_extrapolate_charges_qeq <<< blocks, DEF_BLOCK_SIZE, 0,
+                                     control->streams[4] >>>
+        ( system->d_my_atoms, system->reax_param.d_sbp,
           (control_params *)control->d_control_params,
           *(workspace->d_workspace), system->n );
     hipCheckError( );
@@ -281,7 +303,7 @@ static void Setup_Preconditioner_QEq( reax_system const * const system,
 #endif
 
     /* sort H needed for SpMV's in linear solver, H or H_sp needed for preconditioning */
-//    Sort_Matrix_Rows( &workspace->d_workspace->H, system );
+//    Sort_Matrix_Rows( &workspace->d_workspace->H, system, control );
     
 #if defined(LOG_PERFORMANCE)
     Update_Timing_Info( &time, &data->timing.cm_sort );
@@ -305,9 +327,29 @@ static void Setup_Preconditioner_QEq( reax_system const * const system,
             break;
 
         case SAI_PC:
-//            setup_sparse_approx_inverse( system, data, workspace, mpi_data,
-//                    &workspace->H, &workspace->H_spar_patt, 
-//                    control->nprocs, control->cm_solver_pre_comp_sai_thres );
+            if ( workspace->H.allocated == FALSE )
+            {
+                Allocate_Matrix( &workspace->H,
+                        workspace->d_workspace->H.n, workspace->d_workspace->H.n_max,
+                        workspace->d_workspace->H.m, workspace->d_workspace->H.format );
+            }
+            else if ( workspace->H.m < workspace->d_workspace->H.m
+                   || workspace->H.n_max < workspace->d_workspace->H.n_max )
+            {
+                Deallocate_Matrix( &workspace->H );
+                Allocate_Matrix( &workspace->H,
+                        workspace->d_workspace->H.n, workspace->d_workspace->H.n_max,
+                        workspace->d_workspace->H.m, workspace->d_workspace->H.format );
+            }
+
+            Hip_Copy_Matrix_Device_to_Host( &workspace->H, &workspace->d_workspace->H,
+                   control->streams[4] );
+
+            workspace->H.n = workspace->d_workspace->H.n;
+
+            setup_sparse_approx_inverse( system, data, workspace, mpi_data,
+                    &workspace->H, &workspace->H_spar_patt,
+                    control->nprocs, control->cm_solver_pre_comp_sai_thres );
             break;
 
         default:
@@ -342,29 +384,53 @@ static void Setup_Preconditioner_ACKS2( reax_system const * const system,
 static void Compute_Preconditioner_QEq( reax_system const * const system,
         control_params const * const control,
         simulation_data * const data, storage * const workspace,
-        mpi_datatypes const * const mpi_data )
+        mpi_datatypes * const mpi_data )
 {
 #if defined(HAVE_LAPACKE) || defined(HAVE_LAPACKE_MKL)
+    int ret;
     real t_pc, total_pc;
 #endif
 
     if ( control->cm_solver_pre_comp_type == JACOBI_PC )
     {
-        jacobi( system, workspace );
+        jacobi( system, control, workspace );
     }
     else if ( control->cm_solver_pre_comp_type == SAI_PC )
     {
 #if defined(HAVE_LAPACKE) || defined(HAVE_LAPACKE_MKL)
-//        t_pc = sparse_approx_inverse( system, data, workspace, mpi_data,
-//                &workspace->H, workspace->H_spar_patt, &workspace->H_app_inv, control->nprocs );
-//
-//        ret = MPI_Reduce( &t_pc, &total_pc, 1, MPI_DOUBLE, MPI_SUM, MASTER_NODE, MPI_COMM_WORLD );
-//        Check_MPI_Error( ret, __FILE__, __LINE__ );
-//
-//        if( system->my_rank == MASTER_NODE )
-//        {
-//            data->timing.cm_solver_pre_comp += total_pc / control->nprocs;
-//        }
+        t_pc = sparse_approx_inverse( system, data, workspace, mpi_data,
+                &workspace->H, &workspace->H_spar_patt,
+                &workspace->H_app_inv, control->nprocs );
+
+        ret = MPI_Reduce( &t_pc, &total_pc, 1, MPI_DOUBLE, MPI_SUM, MASTER_NODE, MPI_COMM_WORLD );
+        Check_MPI_Error( ret, __FILE__, __LINE__ );
+
+        if ( workspace->d_workspace->H_app_inv.allocated == FALSE )
+        {
+            Hip_Allocate_Matrix( &workspace->d_workspace->H_app_inv,
+                    workspace->H_app_inv.n, workspace->H_app_inv.n_max,
+                    workspace->H_app_inv.m, workspace->H_app_inv.format,
+                    control->streams[4] );
+        }
+        else if ( workspace->d_workspace->H_app_inv.m < workspace->H_app_inv.m
+               || workspace->d_workspace->H_app_inv.n_max < workspace->H_app_inv.n_max )
+        {
+            Hip_Deallocate_Matrix( &workspace->d_workspace->H_app_inv );
+            Hip_Allocate_Matrix( &workspace->d_workspace->H_app_inv,
+                    workspace->H_app_inv.n, workspace->H_app_inv.n_max,
+                    workspace->H_app_inv.m, workspace->H_app_inv.format,
+                    control->streams[4] );
+        }
+
+        Hip_Copy_Matrix_Host_to_Device( &workspace->H_app_inv,
+                &workspace->d_workspace->H_app_inv, control->streams[4] );
+
+        workspace->d_workspace->H_app_inv.n = workspace->H_app_inv.n;
+
+        if( system->my_rank == MASTER_NODE )
+        {
+            data->timing.cm_solver_pre_comp += total_pc / control->nprocs;
+        }
 #else
         fprintf( stderr, "[ERROR] LAPACKE support disabled. Re-compile before enabling. Terminating...\n" );
         exit( INVALID_INPUT );
@@ -414,25 +480,42 @@ HIP_GLOBAL void k_extrapolate_charges_qeq_part2( reax_atom *my_atoms,
 
 
 static void Extrapolate_Charges_QEq_Part2( reax_system const * const system,
-        storage * const workspace, real * const q, real u )
+        control_params const * const control, storage * const workspace,
+        real * const q, real u )
 {
     int blocks;
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
     real *spad;
+#endif
 
     blocks = system->n / DEF_BLOCK_SIZE
         + ((system->n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(real) * system->n,
-            "Extrapolate_Charges_QEq_Part2::workspace->scratch" );
-    spad = (real *) workspace->scratch;
-    hip_memset( spad, 0, sizeof(real) * system->n, "Extrapolate_Charges_QEq_Part2::spad" );
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
+    sHipCheckMalloc( &workspace->scratch[4], &workspace->scratch_size[4],
+            sizeof(real) * system->n, __FILE__, __LINE__ );
+    spad = (real *) workspace->scratch[4];
+    sHipMemsetAsync( spad, 0, sizeof(real) * system->n,
+            control->streams[4], __FILE__, __LINE__ );
+#endif
 
-    hipLaunchKernelGGL(k_extrapolate_charges_qeq_part2, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(workspace->d_workspace), u, spad, system->n );
+    k_extrapolate_charges_qeq_part2 <<< blocks, DEF_BLOCK_SIZE, 0,
+                                    control->streams[4] >>>
+        ( system->d_my_atoms, *(workspace->d_workspace), u,
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
+          spad,
+#else
+          q,
+#endif
+          system->n );
     hipCheckError( );
 
-    sHipMemcpy( q, spad, sizeof(real) * system->n,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
+    sHipMemcpyAsync( q, spad, sizeof(real) * system->n,
+            hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+
+    hipStreamSynchronize( control->streams[4] );
+#endif
 }
 
 
@@ -453,32 +536,47 @@ HIP_GLOBAL void k_update_ghost_atom_charges( reax_atom *my_atoms, real *q,
 
 
 static void Update_Ghost_Atom_Charges( reax_system const * const system,
-        storage * const workspace, real * const q )
+        control_params const * const control, storage * const workspace,
+        real * const q )
 {
     int blocks;
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
     real *spad;
+#endif
 
     blocks = (system->N - system->n) / DEF_BLOCK_SIZE
         + (((system->N - system->n) % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(real) * (system->N - system->n),
-            "Update_Ghost_Atom_Charges::workspace->scratch" );
-    spad = (real *) workspace->scratch;
-    sHipMemcpy( spad, &q[system->n], sizeof(real) * (system->N - system->n),
-            hipMemcpyHostToDevice, __FILE__, __LINE__ );
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
+    sHipCheckMalloc( &workspace->scratch[4], &workspace->scratch_size[4],
+            sizeof(real) * (system->N - system->n), __FILE__, __LINE__ );
+    spad = (real *) workspace->scratch[4];
 
-    hipLaunchKernelGGL(k_update_ghost_atom_charges, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, spad, system->n, system->N );
+    sHipMemcpyAsync( spad, &q[system->n], sizeof(real) * (system->N - system->n),
+            hipMemcpyHostToDevice, control->streams[4], __FILE__, __LINE__ );
+
+    hipStreamSynchronize( control->streams[4] );
+#endif
+
+    k_update_ghost_atom_charges <<< blocks, DEF_BLOCK_SIZE, 0,
+                                control->streams[4] >>>
+        ( system->d_my_atoms,
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
+          spad,
+#else
+          &q[system->n],
+#endif
+          system->n, system->N );
     hipCheckError( );
 }
 
 
 static void Calculate_Charges_QEq( reax_system const * const system,
-        control_params const * const control,
-        storage * const workspace,
+        control_params const * const control, storage * const workspace,
         mpi_datatypes * const mpi_data )
 {
     int ret;
+    size_t s;
     real u, *q;
     rvec2 my_sum, all_sum;
 #if defined(DUAL_SOLVER)
@@ -492,35 +590,57 @@ static void Calculate_Charges_QEq( reax_system const * const system,
     blocks = system->n / DEF_BLOCK_SIZE
         + ((system->n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(rvec2) * (blocks + 1),
-            "Calculate_Charges_QEq::workspace->scratch" );
-    spad = (rvec2 *) workspace->scratch;
-    hip_memset( spad, 0, sizeof(rvec2) * (blocks + 1),
-            "Calculate_Charges_QEq::spad" );
+#if !defined(HIP_ACCUM_ATOMIC)
+    s = sizeof(rvec2) * (blocks + 1);
+#else
+    s = sizeof(rvec2);
+#endif
+
+    sHipCheckMalloc( &workspace->scratch[4], &workspace->scratch_size[4],
+            s, __FILE__, __LINE__ );
+    spad = (rvec2 *) workspace->scratch[4];
+
+    sHipMemsetAsync( spad, 0, s, control->streams[4], __FILE__, __LINE__ );
 
     /* compute local sums of pseudo-charges in s and t on device */
-    hipLaunchKernelGGL(k_reduction_rvec2, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(rvec2) * (DEF_BLOCK_SIZE / warpSize) , 0,  workspace->d_workspace->x, spad, system->n );
+    k_reduction_rvec2 <<< blocks, DEF_BLOCK_SIZE,
+                      sizeof(hipcub::BlockReduce<double, DEF_BLOCK_SIZE>::TempStorage),
+                      control->streams[4] >>>
+        ( workspace->d_workspace->x, spad, system->n );
     hipCheckError( );
 
-    hipLaunchKernelGGL(k_reduction_rvec2, dim3(1), dim3(((blocks + warpSize - 1) / warpSize) * warpSize), sizeof(rvec2) * ((blocks + warpSize - 1) / warpSize) , 0,  spad, &spad[blocks], blocks );
+#if !defined(HIP_ACCUM_ATOMIC)
+    k_reduction_rvec2 <<< 1, ((blocks + warpSize - 1) / warpSize) * warpSize,
+                      sizeof(hipcub::BlockReduce<double, DEF_BLOCK_SIZE>::TempStorage),
+                      control->streams[4] >>>
+        ( spad, &spad[blocks], blocks );
     hipCheckError( );
+#endif
 
-    sHipMemcpy( &my_sum, &spad[blocks],
-            sizeof(rvec2), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &my_sum,
+#if !defined(HIP_ACCUM_ATOMIC)
+            &spad[blocks],
 #else
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(real) * 2,
-            "Calculate_Charges_QEq::workspace->scratch" );
-    spad = (real *) workspace->scratch;
+            spad,
+#endif
+            sizeof(rvec2), hipMemcpyDeviceToHost,
+            control->streams[4], __FILE__, __LINE__ );
+#else
+    sHipCheckMalloc( &workspace->scratch[4], &workspace->scratch_size[4],
+            sizeof(real) * 2, __FILE__, __LINE__ );
+    spad = (real *) workspace->scratch[4];
 
     /* local reductions (sums) on device */
-    Hip_Reduction_Sum( workspace->d_workspace->s, &spad[0], system->n );
-    Hip_Reduction_Sum( workspace->d_workspace->t, &spad[1], system->n );
+    Hip_Reduction_Sum( workspace->d_workspace->s, &spad[0], system->n,
+            4, control->streams[4] );
+    Hip_Reduction_Sum( workspace->d_workspace->t, &spad[1], system->n,
+            4, control->streams[4] );
 
-    sHipMemcpy( my_sum, spad, sizeof(real) * 2,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( my_sum, spad, sizeof(real) * 2,
+            hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
 #endif
+
+    hipStreamSynchronize( control->streams[4] );
 
     /* global reduction on pseudo-charges for s and t */
     ret = MPI_Allreduce( &my_sum, &all_sum, 2, MPI_DOUBLE,
@@ -529,19 +649,30 @@ static void Calculate_Charges_QEq( reax_system const * const system,
 
     u = all_sum[0] / all_sum[1];
 
-    check_smalloc( &workspace->host_scratch, &workspace->host_scratch_size,
-            sizeof(real) * system->n, TRUE, SAFE_ZONE,
-            "Calculate_Charges_QEq::workspace->host_scratch" );
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
+    smalloc_check( &workspace->host_scratch, &workspace->host_scratch_size,
+            sizeof(real) * system->N, TRUE, SAFE_ZONE,
+            __FILE__, __LINE__ );
     q = (real *) workspace->host_scratch;
+#else
+    sHipCheckMalloc( &workspace->scratch[4], &workspace->scratch_size[4],
+            sizeof(real) * system->N, __FILE__, __LINE__ );
+    q = (real *) workspace->scratch[4];
+#endif
 
     /* derive atomic charges from pseudo-charges
      * and set up extrapolation for next time step */
-    Extrapolate_Charges_QEq_Part2( system, workspace, q, u );
+    Extrapolate_Charges_QEq_Part2( system, control, workspace, q, u );
 
+#if !defined(MPIX_HIP_AWARE_SUPPORT) || !MPIX_HIP_AWARE_SUPPORT
     Dist_FS( system, mpi_data, q, REAL_PTR_TYPE, MPI_DOUBLE );
+#else
+    Hip_Dist_FS( system, workspace, mpi_data, q,
+            REAL_PTR_TYPE, MPI_DOUBLE, control->streams[4] );
+#endif
 
     /* copy atomic charges to ghost atoms in case of ownership transfer */
-    Update_Ghost_Atom_Charges( system, workspace, q );
+    Update_Ghost_Atom_Charges( system, control, workspace, q );
 }
 
 
@@ -573,11 +704,12 @@ void QEq( reax_system const * const system, control_params const * const control
         output_controls const * const out_control,
         mpi_datatypes * const mpi_data )
 {
-    int iters;
+    int iters, refactor;
 
     iters = 0;
+    refactor = is_refactoring_step( control, data );
 
-//    if ( is_refactoring_step( control, data ) == TRUE )
+    if ( refactor == TRUE )
     {
         Setup_Preconditioner_QEq( system, control, data, workspace, mpi_data );
 
@@ -625,12 +757,14 @@ void QEq( reax_system const * const system, control_params const * const control
 #if defined(DUAL_SOLVER)
         iters = Hip_dual_CG( system, control, data, workspace,
                 &workspace->d_workspace->H, workspace->d_workspace->b,
-                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data, refactor );
 #else
         iters = Hip_CG( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s,
+                mpi_data, refactor );
         iters += Hip_CG( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t,
+                mpi_data, FALSE );
 #endif
         break;
 
@@ -638,12 +772,14 @@ void QEq( reax_system const * const system, control_params const * const control
 #if defined(DUAL_SOLVER)
         iters = Hip_dual_SDM( system, control, data, workspace,
                 &workspace->d_workspace->H, workspace->d_workspace->b,
-                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data, refactor );
 #else
         iters = Hip_SDM( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s,
+                mpi_data, refactor );
         iters += Hip_SDM( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t,
+                mpi_data, FALSE );
 #endif
         break;
 
@@ -651,12 +787,14 @@ void QEq( reax_system const * const system, control_params const * const control
 #if defined(DUAL_SOLVER)
         iters = Hip_dual_BiCGStab( system, control, data, workspace,
                 &workspace->d_workspace->H, workspace->d_workspace->b,
-                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data, refactor );
 #else
         iters = Hip_BiCGStab( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s,
+                mpi_data, refactor );
         iters += Hip_BiCGStab( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t,
+                mpi_data, FALSE );
 #endif
         break;
 
@@ -664,12 +802,14 @@ void QEq( reax_system const * const system, control_params const * const control
 #if defined(DUAL_SOLVER)
         iters = Hip_dual_PIPECG( system, control, data, workspace,
                 &workspace->d_workspace->H, workspace->d_workspace->b,
-                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data, refactor );
 #else
         iters = Hip_PIPECG( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s,
+                mpi_data, refactor );
         iters += Hip_PIPECG( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t,
+                mpi_data, FALSE );
 #endif
         break;
 
@@ -677,12 +817,14 @@ void QEq( reax_system const * const system, control_params const * const control
 #if defined(DUAL_SOLVER)
         iters = Hip_dual_PIPECR( system, control, data, workspace,
                 &workspace->d_workspace->H, workspace->d_workspace->b,
-                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->d_workspace->x, mpi_data, refactor );
 #else
         iters = Hip_PIPECR( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s, mpi_data );
+                workspace->d_workspace->b_s, control->cm_solver_q_err, workspace->d_workspace->s,
+                mpi_data, refactor );
         iters += Hip_PIPECR( system, control, data, workspace, &workspace->d_workspace->H,
-                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t, mpi_data );
+                workspace->d_workspace->b_t, control->cm_solver_q_err, workspace->d_workspace->t,
+                mpi_data, FALSE );
 #endif
         break;
 

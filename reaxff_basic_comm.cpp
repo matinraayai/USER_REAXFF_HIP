@@ -21,11 +21,8 @@
 
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
-
-
-
 
 #if defined(PURE_REAX)
   #include "basic_comm.h"
@@ -358,14 +355,14 @@ void Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
         nbr2 = &system->my_nbrs[2 * d + 1];
 
         /* pack MPI buffers and initiate sends */
-        check_smalloc( &out_bufs[2 * d].out_atoms,
+        smalloc_check( &out_bufs[2 * d].out_atoms,
                 &out_bufs[2 * d].out_atoms_size,
                 type_size * out_bufs[2 * d].cnt,
-                TRUE, SAFE_ZONE, "Dist::mpi_data->out_atoms" );
-        check_srealloc( (void **) &out_bufs[2 * d].index,
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
+        srealloc_check( (void **) &out_bufs[2 * d].index,
                 &out_bufs[2 * d].index_size,
                 sizeof(int) * out_bufs[2 * d].cnt,
-                TRUE, SAFE_ZONE, "Dist::mpi_data->index" );
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         pack( buf, &out_bufs[2 * d] );
 
@@ -373,14 +370,14 @@ void Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
                 type, nbr1->rank, 2 * d, comm, &req1 );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        check_smalloc( &out_bufs[2 * d + 1].out_atoms,
+        smalloc_check( &out_bufs[2 * d + 1].out_atoms,
                 &out_bufs[2 * d + 1].out_atoms_size,
                 type_size * out_bufs[2 * d + 1].cnt,
-                TRUE, SAFE_ZONE, "Dist::mpi_data->out_atoms" );
-        check_srealloc( (void **) &out_bufs[2 * d + 1].index,
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
+        srealloc_check( (void **) &out_bufs[2 * d + 1].index,
                 &out_bufs[2 * d + 1].index_size,
                 sizeof(int) * out_bufs[2 * d + 1].cnt,
-                TRUE, SAFE_ZONE, "Dist::mpi_data->index" );
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         pack( buf, &out_bufs[2 * d + 1] );
 
@@ -466,14 +463,14 @@ void Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_data,
         nbr2 = &system->my_nbrs[2 * d + 1];
 
         /* pack MPI buffers and initiate sends */
-        check_smalloc( &out_bufs[2 * d].out_atoms,
+        smalloc_check( &out_bufs[2 * d].out_atoms,
                 &out_bufs[2 * d].out_atoms_size,
                 type_size * out_bufs[2 * d].cnt,
-                TRUE, SAFE_ZONE, "Dist_FS::mpi_data->out_atoms" );
-        check_srealloc( (void **) &out_bufs[2 * d].index,
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
+        srealloc_check( (void **) &out_bufs[2 * d].index,
                 &out_bufs[2 * d].index_size,
                 sizeof(int) * out_bufs[2 * d].cnt,
-                TRUE, SAFE_ZONE, "Dist_FS::mpi_data->index" );
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         pack( buf, &out_bufs[2 * d] );
 
@@ -481,14 +478,14 @@ void Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_data,
                 type, nbr1->rank, 2 * d, comm, &req1 );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        check_smalloc( &out_bufs[2 * d + 1].out_atoms,
+        smalloc_check( &out_bufs[2 * d + 1].out_atoms,
                 &out_bufs[2 * d + 1].out_atoms_size,
                 type_size * out_bufs[2 * d + 1].cnt,
-                TRUE, SAFE_ZONE, "Dist_FS::mpi_data->out_atoms" );
-        check_srealloc( (void **) &out_bufs[2 * d + 1].index,
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
+        srealloc_check( (void **) &out_bufs[2 * d + 1].index,
                 &out_bufs[2 * d + 1].index_size,
                 sizeof(int) * out_bufs[2 * d + 1].cnt,
-                TRUE, SAFE_ZONE, "Dist_FS::mpi_data->index" );
+                TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         pack( buf, &out_bufs[2 * d + 1] );
 
@@ -622,8 +619,8 @@ void Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
-        check_smalloc( &mpi_data->in1_buffer, &mpi_data->in1_buffer_size,
-                type_size * cnt1, TRUE, SAFE_ZONE, "Coll::mpi_data->in1_buffer" );
+        smalloc_check( &mpi_data->in1_buffer, &mpi_data->in1_buffer_size,
+                type_size * cnt1, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->in1_buffer, cnt1,
                 type, nbr1->rank, 2 * d + 1, comm, MPI_STATUS_IGNORE );
@@ -640,8 +637,8 @@ void Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
-        check_smalloc( &mpi_data->in2_buffer, &mpi_data->in2_buffer_size,
-                type_size * cnt2, TRUE, SAFE_ZONE, "Coll::mpi_data->in2_buffer" );
+        smalloc_check( &mpi_data->in2_buffer, &mpi_data->in2_buffer_size,
+                type_size * cnt2, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->in2_buffer, cnt2,
                 type, nbr2->rank, 2 * d, comm, MPI_STATUS_IGNORE );
@@ -706,9 +703,15 @@ void Coll_FS( reax_system const * const system, mpi_datatypes * const mpi_data,
             fprintf( stderr, "[ERROR] MPI_Get_count returned MPI_UNDEFINED\n" );
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
+        else if ( cnt1 != out_bufs[2 * d].cnt )
+        {
+            fprintf( stderr, "[ERROR] Coll_FS: counts mismatch (MPI_Get_count = %d, out_bufs[%d].cnt = %d\n",
+                  cnt1, 2 * d, out_bufs[2 * d].cnt );
+            MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
+        }
 
-        check_smalloc( &mpi_data->in1_buffer, &mpi_data->in1_buffer_size,
-                type_size * cnt1, TRUE, SAFE_ZONE, "Coll_FS::mpi_data->in1_buffer" );
+        smalloc_check( &mpi_data->in1_buffer, &mpi_data->in1_buffer_size,
+                type_size * cnt1, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->in1_buffer, cnt1,
                 type, nbr1->rank, 2 * d + 1, comm, MPI_STATUS_IGNORE );
@@ -724,9 +727,15 @@ void Coll_FS( reax_system const * const system, mpi_datatypes * const mpi_data,
             fprintf( stderr, "[ERROR] MPI_Get_count returned MPI_UNDEFINED\n" );
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
+        else if ( cnt2 != out_bufs[2 * d + 1].cnt )
+        {
+            fprintf( stderr, "[ERROR] Coll_FS: counts mismatch (MPI_Get_count = %d, out_bufs[%d].cnt = %d\n",
+                  cnt2, 2 * d + 1, out_bufs[2 * d + 1].cnt );
+            MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
+        }
 
-        check_smalloc( &mpi_data->in2_buffer, &mpi_data->in2_buffer_size,
-                type_size * cnt2, TRUE, SAFE_ZONE, "Coll_FS::mpi_data->in2_buffer" );
+        smalloc_check( &mpi_data->in2_buffer, &mpi_data->in2_buffer_size,
+                type_size * cnt2, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->in2_buffer, cnt2,
                 type, nbr2->rank, 2 * d, comm, MPI_STATUS_IGNORE );
@@ -740,26 +749,6 @@ void Coll_FS( reax_system const * const system, mpi_datatypes * const mpi_data,
         unpack( mpi_data->in1_buffer, buf, &out_bufs[2 * d] );
         unpack( mpi_data->in2_buffer, buf, &out_bufs[2 * d + 1] );
     }
-}
-
-
-real Parallel_Norm( real const * const v, const int n, MPI_Comm comm )
-{
-    int i, ret;
-    real sum_l, norm_sqr;
-
-    sum_l = 0.0;
-
-    /* compute local part of vector 2-norm */
-    for ( i = 0; i < n; ++i )
-    {
-        sum_l += SQR( v[i] );
-    }
-
-    ret = MPI_Allreduce( &sum_l, &norm_sqr, 1, MPI_DOUBLE, MPI_SUM, comm );
-    Check_MPI_Error( ret, __FILE__, __LINE__ );
-
-    return SQRT( norm_sqr );
 }
 
 
@@ -784,26 +773,6 @@ real Parallel_Dot( real const * const v1, real const * const v2,
 }
 
 
-real Parallel_Vector_Acc( real const * const v, const int n,
-        MPI_Comm comm )
-{
-    int i, ret;
-    real my_acc, res;
-
-    /* compute local part of vector element-wise sum */
-    my_acc = 0.0;
-    for ( i = 0; i < n; ++i )
-    {
-        my_acc += v[i];
-    }
-
-    ret = MPI_Allreduce( &my_acc, &res, 1, MPI_DOUBLE, MPI_SUM, comm );
-    Check_MPI_Error( ret, __FILE__, __LINE__ );
-
-    return res;
-}
-
-
 /*****************************************************************************/
 #if defined(TEST_FORCES)
 void Coll_ids_at_Master( reax_system *system, storage *workspace,
@@ -824,7 +793,7 @@ void Coll_ids_at_Master( reax_system *system, storage *workspace,
         }
     }
 
-    id_list = (int*) smalloc( system->n * sizeof(int), "Coll_ids_at_Master::id_list" );
+    id_list = smalloc( system->n * sizeof(int), __FILE__, __LINE__ );
     for ( i = 0; i < system->n; ++i )
     {
         id_list[i] = system->my_atoms[i].orig_id;
@@ -835,7 +804,7 @@ void Coll_ids_at_Master( reax_system *system, storage *workspace,
             MASTER_NODE, MPI_COMM_WORLD );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-    sfree( id_list, "Coll_ids_at_Master::id_list" );
+    sfree( id_list, __FILE__, __LINE__ );
 
 #if defined(DEBUG_FOCUS)
     if ( system->my_rank == MASTER_NODE )

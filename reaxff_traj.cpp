@@ -30,19 +30,17 @@
   #include "comm_tools.h"
   #include "list.h"
   #include "tool_box.h"
-  #if defined(PURE_REAX)
-    #include "hip/hip_copy.h"
-  #endif
 #elif defined(LAMMPS_REAX)
-  #include "reaxff_traj.h"
+  #include "reaxff_hip_traj.h"
 
-  #include "reaxff_comm_tools.h"
-  #include "reaxff_list.h"
-  #include "reaxff_tool_box.h"
+  #include "reaxff_hip_comm_tools.h"
+  #include "reaxff_hip_list.h"
+  #include "reaxff_hip_tool_box.h"
   #include "error.h"
-  #if defined(HAVE_HIP)
-    #include "reaxff_hip_copy.h"
-  #endif
+#endif
+
+#if defined(HAVE_HIP)
+  #include "hip/hip_copy.h"
 #endif
 
 
@@ -80,12 +78,12 @@ int Reallocate_Output_Buffer( output_controls *out_control, int req_space,
 {
     if ( out_control->buffer_len > 0 )
     {
-        sfree( out_control->buffer, "Reallocate_Output_Buffer::out_control->buffer" );
+        sfree( out_control->buffer, __FILE__, __LINE__ );
     }
 
     out_control->buffer_len = req_space * SAFE_ZONE;
-    out_control->buffer = (char*) smalloc( out_control->buffer_len * sizeof(char),
-            "Reallocate_Output_Buffer::out_control->buffer" );
+    out_control->buffer = static_cast<char*>(smalloc( out_control->buffer_len * sizeof(char),
+            __FILE__, __LINE__ ));
     if ( out_control->buffer == NULL )
     {
         fprintf( stderr,
@@ -478,7 +476,7 @@ void Init_Traj( reax_system *system, control_params *control,
 
     /* allocate line & buffer space */
     out_control->line = static_cast<char*>(scalloc( MAX_TRJ_LINE_LEN + 1, sizeof(char),
-           "Init_Traj::out_control->line" ));
+                                                    __FILE__, __LINE__ ));
     out_control->buffer_len = 0;
     out_control->buffer = NULL;
 
@@ -528,8 +526,7 @@ void Init_Traj( reax_system *system, control_params *control,
     {
         if ( system->my_rank == MASTER_NODE )
         {
-            out_control->strj = sfopen( fname, "w",
-                   "Init_Traj::out_control->strj" );
+            out_control->strj = sfopen( fname, "w", __FILE__, __LINE__ );
         }
     }
     else
@@ -1086,7 +1083,7 @@ void Append_Frame( reax_system *system, control_params *control,
     if ( out_control->write_atoms )
     {
 #if defined(HAVE_HIP)
-        Hip_Copy_Atoms_Device_to_Host( system );
+        Hip_Copy_Atoms_Device_to_Host( system, control );
 #endif
         Write_Atoms( system, control, out_control, mpi_data );
     }
@@ -1094,7 +1091,7 @@ void Append_Frame( reax_system *system, control_params *control,
     if ( out_control->write_bonds )
     {
 #if defined(HAVE_HIP)
-        Hip_Copy_List_Device_to_Host( bond_list, lists[BONDS], TYP_BOND );
+        Hip_Copy_List_Device_to_Host( control, bond_list, lists[BONDS], TYP_BOND );
         Write_Bonds( system, control, bond_list, out_control, mpi_data );
 #else
         Write_Bonds( system, control, lists[BONDS], out_control, mpi_data );
@@ -1104,7 +1101,8 @@ void Append_Frame( reax_system *system, control_params *control,
     if ( out_control->write_angles )
     {
 #if defined(HAVE_HIP)
-        Hip_Copy_List_Device_to_Host( thb_list, lists[THREE_BODIES], TYP_THREE_BODY );
+        Hip_Copy_List_Device_to_Host( control, thb_list, lists[THREE_BODIES],
+                TYP_THREE_BODY );
         Write_Angles( system, control, bond_list, thb_list,
                       out_control, mpi_data );
 #else
@@ -1137,9 +1135,9 @@ void End_Traj( int my_rank, output_controls *out_control )
     }
     else if ( my_rank == MASTER_NODE )
     {
-        sfclose( out_control->strj, "End_Traj::out_control->strj" );
+        sfclose( out_control->strj, __FILE__, __LINE__ );
     }
 
-    sfree( out_control->buffer, "End_Traj::out_control->buffer" );
-    sfree( out_control->line, "End_Traj::out_control->line" );
+    sfree( out_control->buffer, __FILE__, __LINE__ );
+    sfree( out_control->line, __FILE__, __LINE__ );
 }

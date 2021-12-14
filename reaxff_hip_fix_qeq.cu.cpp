@@ -127,9 +127,6 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
                                    control_params *control, int n, double *d_Tap, double *gamma,
                                    int *max_cm_entries, int *realloc_cm_entries)
                                    {
-
-
-
     int i, j, pj;
     int start_i, end_i;
     int type_i, type_j;
@@ -170,8 +167,6 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms,
 
             if ( far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut)
             {
-//                if ( i == 500)
-//                    printf("%d,%d,%f,%f\n", i, j, nbr_pj->d, control->nonb_cut);
                 j = far_nbr_list.far_nbr_list.nbr[pj];
                 atom_j = &my_atoms[j];
                 type_j = atom_j->type;
@@ -215,12 +210,6 @@ void  Hip_Calculate_H_Matrix(reax_list **lists,  reax_system *system, fix_qeq_gp
                        qeq_gpu->d_fix_my_atoms, *(lists[FAR_NBRS]), n );
 	hipCheckError();
 	hipDeviceSynchronize();
-
-	//printf("nonb %f, %d\n",control->nonb_cut,n );
-
-
-	//printf("Blocks %d , blocks size %d\n", blocks, DEF_BLOCK_SIZE);
-	//printf("N %d, h n %d \n",system->N, qeq_gpu->H.n);
 
 	hipLaunchKernelGGL(k_init_cm_full_fs , dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0,  qeq_gpu->d_fix_my_atoms,
                        *(lists[FAR_NBRS]), qeq_gpu->H, (control_params *) control->d_control_params, n, qeq_gpu->d_Tap,qeq_gpu->gamma,
@@ -278,8 +267,7 @@ void Hip_Estimate_CMEntries_Storages( reax_system *system, control_params *contr
 }
 
 
-HIP_GLOBAL void k_init_matvec_fix(fix_qeq_gpu d_qeq_gpu,int n, single_body_parameters
-		*sbp,reax_atom *my_atoms)
+HIP_GLOBAL void k_init_matvec_fix(fix_qeq_gpu d_qeq_gpu, int n, single_body_parameters *sbp,reax_atom *my_atoms)
 {
 	int i;
 	int type_i;
@@ -305,17 +293,18 @@ HIP_GLOBAL void k_init_matvec_fix(fix_qeq_gpu d_qeq_gpu,int n, single_body_param
 
 	qeq_gpu->t[i] = qeq_gpu->t_hist[i][2] + 3 * ( qeq_gpu->t_hist[i][0] - qeq_gpu->t_hist[i][1]);
 	/* cubic extrapolation for s & t from previous solutions */
-	qeq_gpu->s[i] = 4*(qeq_gpu->s_hist[i][0]+qeq_gpu->s_hist[i][2])-(6*qeq_gpu->s_hist[i][1]+qeq_gpu->s_hist[i][3]);
+	qeq_gpu->s[i] = 4*(qeq_gpu->s_hist[i][0] + qeq_gpu->s_hist[i][2])-(6*qeq_gpu->s_hist[i][1]+qeq_gpu->s_hist[i][3]);
 }
 
-void  Hip_Init_Matvec_Fix(int n, fix_qeq_gpu *qeq_gpu, reax_system *system)
+void Hip_Init_MatVec_Fix(int n, fix_qeq_gpu *qeq_gpu, reax_system *system)
 {
 	int blocks;
 
 	blocks = n / DEF_BLOCK_SIZE
 			+ (( n % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 
-	hipLaunchKernelGGL(k_init_matvec_fix, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, *(qeq_gpu),n,system->reax_param.d_sbp,qeq_gpu->d_fix_my_atoms);
+	hipLaunchKernelGGL(k_init_matvec_fix, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0, 0, *(qeq_gpu),n, 
+                     system->reax_param.d_sbp,qeq_gpu->d_fix_my_atoms);
 	hipDeviceSynchronize();
 	hipCheckError();
 }
@@ -494,29 +483,29 @@ HIP_GLOBAL void k_init_q(reax_atom *my_atoms, double *q, double *x,double *eta, 
 }
 
 
-void Hip_Sparse_Matvec_Compute(sparse_matrix *H,double *x, double *q, double *eta, reax_atom *d_fix_my_atoms, int nn, int NN)
-{
-
-	int blocks;
-
-	blocks = NN / DEF_BLOCK_SIZE
-			+ (( NN % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
-
-
-	hipLaunchKernelGGL(k_init_q, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, d_fix_my_atoms, q, x, eta, nn, NN);
-	hipDeviceSynchronize();
-
-
-    Sparse_MatVec_local(nullptr, H, x, q, nn);
-//	blocks = nn / DEF_BLOCK_SIZE
-//	        + (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
+//void Hip_Sparse_Matvec_Compute(sparse_matrix *H,double *x, double *q, double *eta, reax_atom *d_fix_my_atoms, int nn, int NN)
+//{
+//
+//	int blocks;
+//
+//	blocks = NN / DEF_BLOCK_SIZE
+//			+ (( NN % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 //
 //
-//	hipLaunchKernelGGL(k_matvec_csr_fix, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0 , 0, H, x, q, nn);
-	hipDeviceSynchronize();
-	hipCheckError();
-
-}
+//	hipLaunchKernelGGL(k_init_q, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0, d_fix_my_atoms, q, x, eta, nn, NN);
+//	hipDeviceSynchronize();
+//
+//
+//    Sparse_MatVec_local(nullptr, H, x, q, nn);
+////	blocks = nn / DEF_BLOCK_SIZE
+////	        + (( nn % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
+////
+////
+////	hipLaunchKernelGGL(k_matvec_csr_fix, dim3(blocks), dim3(DEF_BLOCK_SIZE), 0 , 0, H, x, q, nn);
+//	hipDeviceSynchronize();
+//	hipCheckError();
+//
+//}
 
 void Hip_Vector_Sum_Fix( real *res, real a, real *x, real b, real *y, int count )
 {

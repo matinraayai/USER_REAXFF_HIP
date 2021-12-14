@@ -1,26 +1,28 @@
-#ifndef __CUDA_UTILS_H_
-#define __CUDA_UTILS_H_
+#ifndef __HIP_UTILS_H_
+#define __HIP_UTILS_H_
 
-#if defined(PURE_REAX)
-    #include "../reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
 
 
+void sHipMalloc( void **, size_t, const char * const, int );
 
-void hip_malloc(void **, size_t, int, const char * );
+void sHipFree( void *, const char * const, int );
 
-void hip_free( void *, const char * );
+void sHipMemset( void *, int, size_t, const char * const, int );
 
-void hip_memset( void *, int , size_t , const char * );
+void sHipMemsetAsync( void *, int, size_t, hipStream_t, const char * const, int );
 
-void hip_check_malloc( void **, size_t *, size_t, const char * );
+void sHipCheckMalloc( void **, size_t *, size_t, const char * const, int );
 
 void sHipMemcpy( void * const, void const * const, size_t,
         enum hipMemcpyKind, const char * const, int );
 
-void Hip_Print_Mem_Usage( );
+void sHipMemcpyAsync( void * const, void const * const, size_t,
+        enum hipMemcpyKind, hipStream_t, const char * const, int );
 
 
 #define hipCheckError() __hipCheckError( __FILE__, __LINE__ )
@@ -58,7 +60,7 @@ static inline void __hipCheckError( const char *file, const int line )
         fprintf( stderr, "    [INFO] HIP API error text: %s\n", hipGetErrorString( err ) );
 #if !defined(DEBUG)
         fprintf( stderr, "    [WARNING] HIP error info may not be precise due to async nature of HIP kernels!"
-               " Rebuild in debug mode to get more accurate accounts of errors (--enable-debug=yes with configure script if in PuReMD, -DDEBUG in LAMMPS).\n" );
+               " Rebuild in debug mode to get more accurate accounts of errors (--enable-debug=yes with configure script).\n" );
 #endif
         exit( RUNTIME_ERROR );
     }

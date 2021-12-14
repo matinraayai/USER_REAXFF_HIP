@@ -19,12 +19,9 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#include "reaxff_types.h"
-
-
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
 
 #if defined(PURE_REAX)
@@ -42,7 +39,7 @@ void Print_List_Indices( reax_list * const l )
 {
     int i;
 
-    assert( l != nullptr );
+    assert( l != NULL );
 
     for ( i = 0; i < l->n; i++ )
     {
@@ -67,7 +64,7 @@ void Make_List( int n, int max_intrs, int type, int format, reax_list * const l 
 {
     assert( n > 0 );
     assert( max_intrs > 0 );
-    assert( l != nullptr );
+    assert( l != NULL );
 
     if ( l->allocated == TRUE )
     {
@@ -82,46 +79,46 @@ void Make_List( int n, int max_intrs, int type, int format, reax_list * const l 
     l->type = type;
     l->format = format;
 
-    l->index = static_cast<int*>(smalloc( sizeof(int) * n, "Make_List::index" ));
-    l->end_index = static_cast<int*>(smalloc( sizeof(int) * n, "Make_List::end_index" ));
+    l->index = static_cast<int*>(smalloc( sizeof(int) * n, __FILE__, __LINE__ ));
+    l->end_index = static_cast<int*>(smalloc( sizeof(int) * n, __FILE__, __LINE__ ));
 
     switch ( l->type )
     {
     case TYP_VOID:
-        l->v = smalloc( sizeof(void*) * l->max_intrs, "Make_List::v" );
+        l->v = smalloc( sizeof(void*) * l->max_intrs, __FILE__, __LINE__ );
         break;
 
     case TYP_FAR_NEIGHBOR:
         l->far_nbr_list.nbr = static_cast<int*>(smalloc( sizeof(int) * l->max_intrs,
-                "Make_List::far_nbr_list.nbr" ));
+                                                         __FILE__, __LINE__ ));
         l->far_nbr_list.rel_box = static_cast<ivec*>(smalloc( sizeof(ivec) * l->max_intrs,
-                "Make_List::far_nbr_list.rel_box" ));
+                                                              __FILE__, __LINE__ ));
         l->far_nbr_list.d = static_cast<real*>(smalloc( sizeof(real) * l->max_intrs,
-                "Make_List::far_nbr_list.d" ));
+                                                        __FILE__, __LINE__ ));
         l->far_nbr_list.dvec = static_cast<rvec*>(smalloc( sizeof(rvec) * l->max_intrs,
-                "Make_List::far_nbr_list.dvec" ));
+                                                           __FILE__, __LINE__ ));
         break;
 
     case TYP_BOND:
-        l->bond_list = static_cast<bond_data*>(smalloc( sizeof(bond_data) * l->max_intrs, "Make_List::bonds" ));
+        l->bond_list = static_cast<bond_data*>(smalloc( sizeof(bond_data) * l->max_intrs, __FILE__, __LINE__ ));
         break;
 
     case TYP_HBOND:
-        l->hbond_list = static_cast<hbond_data*>(smalloc( sizeof(hbond_data) * l->max_intrs, "Make_List::hbonds" ));
+        l->hbond_list = static_cast<hbond_data*>(smalloc( sizeof(hbond_data) * l->max_intrs, __FILE__, __LINE__ ));
         break;
 
     case TYP_THREE_BODY:
         l->three_body_list = static_cast<three_body_interaction_data*>(smalloc( sizeof(three_body_interaction_data) * l->max_intrs,
-                "Make_List::three_bodies" ));
+                                                                                __FILE__, __LINE__ ));
         break;
 
 #if defined(TEST_FORCES)
     case TYP_DBO:
-        l->dbo_list = smalloc( sizeof(dbond_data) * l->max_intrs, "Make_List::dbonds" );
+        l->dbo_list = smalloc( sizeof(dbond_data) * l->max_intrs, __FILE__, __LINE__ );
         break;
 
     case TYP_DDELTA:
-        l->dDelta_list = smalloc( sizeof(dDelta_data) * l->max_intrs, "Make_List::dDeltas" );
+        l->dDelta_list = smalloc( sizeof(dDelta_data) * l->max_intrs, __FILE__, __LINE__ );
         break;
 #endif
 
@@ -135,7 +132,7 @@ void Make_List( int n, int max_intrs, int type, int format, reax_list * const l 
 
 void Delete_List( reax_list * const l )
 {
-    assert( l != nullptr );
+    assert( l != NULL );
 
     if ( l->allocated == FALSE )
     {
@@ -148,41 +145,41 @@ void Delete_List( reax_list * const l )
     l->n = 0;
     l->max_intrs = 0;
 
-    sfree( l->index, "Delete_List::index" );
-    sfree( l->end_index, "Delete_List::end_index" );
+    sfree( l->index, __FILE__, __LINE__ );
+    sfree( l->end_index, __FILE__, __LINE__ );
 
     switch ( l->type )
     {
     case TYP_VOID:
-        sfree( l->v, "Delete_List::v" );
+        sfree( l->v, __FILE__, __LINE__ );
         break;
 
     case TYP_FAR_NEIGHBOR:
-        sfree( l->far_nbr_list.nbr, "Delete_List::far_nbr_list.nbr" );
-        sfree( l->far_nbr_list.rel_box, "Delete_List::far_nbr_list.rel_box" );
-        sfree( l->far_nbr_list.d, "Delete_List::far_nbr_list.d" );
-        sfree( l->far_nbr_list.dvec, "Delete_List::far_nbr_list.dvec" );
+        sfree( l->far_nbr_list.nbr, __FILE__, __LINE__ );
+        sfree( l->far_nbr_list.rel_box, __FILE__, __LINE__ );
+        sfree( l->far_nbr_list.d, __FILE__, __LINE__ );
+        sfree( l->far_nbr_list.dvec, __FILE__, __LINE__ );
         break;
 
     case TYP_BOND:
-        sfree( l->bond_list, "Delete_List::bonds" );
+        sfree( l->bond_list, __FILE__, __LINE__ );
         break;
 
     case TYP_HBOND:
-        sfree( l->hbond_list, "Delete_List::hbonds" );
+        sfree( l->hbond_list, __FILE__, __LINE__ );
         break;
 
     case TYP_THREE_BODY:
-        sfree( l->three_body_list, "Delete_List::three_bodies" );
+        sfree( l->three_body_list, __FILE__, __LINE__ );
         break;
 
 #if defined(TEST_FORCES)
     case TYP_DBO:
-        sfree( l->dbo_list, "Delete_List::dbos" );
+        sfree( l->dbo_list, __FILE__, __LINE__ );
         break;
 
     case TYP_DDELTA:
-        sfree( l->dDelta_list, "Delete_List::dDeltas" );
+        sfree( l->dDelta_list, __FILE__, __LINE__ );
         break;
 #endif
 
@@ -203,9 +200,9 @@ void Init_List_Indices( reax_list * const l, int * const max_intrs )
 {
     int i;
 
-    assert( l != nullptr );
+    assert( l != NULL );
     assert( l->n > 0 );
-    assert( max_intrs != nullptr );
+    assert( max_intrs > 0 );
 
     /* exclusive prefix sum of max_intrs replaces start indices,
      * set end indices to the same as start indices for safety */

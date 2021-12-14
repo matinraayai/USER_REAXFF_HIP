@@ -22,10 +22,10 @@
 #ifndef __COMM_TOOLS_H_
 #define __COMM_TOOLS_H_
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "reax_types.h"
 #endif
 
 

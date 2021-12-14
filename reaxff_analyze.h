@@ -19,33 +19,26 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_BASIC_COMM_H_
-#define __CUDA_BASIC_COMM_H_
+#ifndef __ANALYZE_H_
+#define __ANALYZE_H_
 
 #if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
 #else
-    #include "../reax_types.h"
+    #include "reax_types.h"
 #endif
 
 
-enum pointer_type
-{
-    INT_PTR_TYPE = 0,
-    REAL_PTR_TYPE = 1,
-    RVEC_PTR_TYPE = 2,
-    RVEC2_PTR_TYPE = 3,
-};
+#ifdef __cplusplus
+extern "C"  {
+#endif
 
+void Analysis( reax_system*, control_params*, simulation_data*, storage*,
+        reax_list**, output_controls*, mpi_datatypes* );
 
-void Hip_Dist( reax_system const * const, storage * const, mpi_datatypes * const,
-        void const * const, int, MPI_Datatype, cudaStream_t );
-
-void Hip_Dist_FS( reax_system const * const, storage * const, mpi_datatypes * const,
-        void const * const, int, MPI_Datatype, cudaStream_t );
-
-void Hip_Coll( reax_system const * const, mpi_datatypes * const,
-        void * const , int, MPI_Datatype, cudaStream_t );
+#ifdef __cplusplus
+}
+#endif
 
 
 #endif

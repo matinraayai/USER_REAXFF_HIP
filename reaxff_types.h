@@ -77,11 +77,11 @@
 //TODO: rewrite this to use configure option to include
 /* OpenMPI extensions for CUDA-aware support */
 //#include <mpi-ext.h>
-#if defined(MPIX_CUDA_AWARE_SUPPORT) && MPIX_CUDA_AWARE_SUPPORT
-  #define CUDA_DEVICE_PACK
+#if (defined(MPIX_CUDA_AWARE_SUPPORT) && MPIX_CUDA_AWARE_SUPPORT && defined(__HIP_PLAFTORM_NVCC__)) || (defined(__HIP_PLATFORM_HCC__))
+  #define HIP_DEVICE_PACK
 #endif
 /* aggregate atomic energies and forces using atomic operations */
-#define CUDA_ACCUM_ATOMIC
+#define HIP_ACCUM_ATOMIC
 
 /* disable assertions if NOT compiling with debug support --
  * the definition (or lack thereof) controls how the assert macro is defined */
@@ -89,10 +89,6 @@
   #define NDEBUG
 #endif
 #include <assert.h>
-
-#if defined(LAMMPS_REAX)
-    #include "lammps_interface.h"
-#endif
 
 #define SUCCESS (1)
 #define FAILURE (0)
@@ -115,14 +111,6 @@
 #define FABS fabs
 #define FMOD fmod
 
-/* transcendental constant pi */
-#if defined(M_PI)
-/* GNU C library (libc), defined in math.h */
-  #define PI (M_PI)
-#else
-  #define PI (3.14159265)
-#endif
-
 #define SQR(x) ((x)*(x))
 #define CUBE(x) ((x)*(x)*(x))
 #define DEG2RAD(a) ((a)*PI/180.0)
@@ -132,52 +120,62 @@
 #define MAX3(x,y,z) MAX( MAX((x),(y)), (z))
 
 #if defined(USE_REF_FORTRAN_REAXFF_CONSTANTS)
-/* transcendental constant pi */
-//  #define PI (3.14159265)
-/* unit conversion from ??? to kcal / mol */
+  /* transcendental constant pi */
+  #define PI (3.14159265)
+  /* unit conversion from ??? to kcal / mol */
   #define C_ELE (332.0638)
-/* Boltzmann constant, AMU * A^2 / (ps^2 * K) */
-  #define K_B (0.831687)
-//  #define K_B (0.8314510)
-/* unit conversion for atomic force to AMU * A / ps^2 */
+  /* Boltzmann constant, AMU * A^2 / (ps^2 * K) */
+//  #define K_B (0.831687)
+  #define K_B (0.8314510)
+  /* unit conversion for atomic force to AMU * A / ps^2 */
   #define F_CONV (4.184e2)
-/* energy conversion constant from electron volts to kilo-calories per mole */
+  /* energy conversion constant from electron volts to kilo-calories per mole */
   #define KCALpMOL_to_EV (23.02)
-/* electric dipole moment conversion constant from elementary charge * angstrom to debye */
+  /* electric dipole moment conversion constant from elementary charge * angstrom to debye */
   #define ECxA_to_DEBYE (4.80320679913)
 #elif defined(USE_REF_FORTRAN_EREAXFF_CONSTANTS)
-//TODO
-/* energy conversion constant from electron volts to kilo-calories per mole */
+  //TODO
+  /* energy conversion constant from electron volts to kilo-calories per mole */
   #define KCALpMOL_to_EV (23.02)
-/* electric dipole moment conversion constant from elementary charge * angstrom to debye */
+  /* electric dipole moment conversion constant from elementary charge * angstrom to debye */
   #define ECxA_to_DEBYE (4.80320679913)
 #elif defined(USE_LAMMPS_REAXFF_CONSTANTS)
-//TODO
-/* energy conversion constant from electron volts to kilo-calories per mole */
+  //TODO
+  /* energy conversion constant from electron volts to kilo-calories per mole */
   #define KCALpMOL_to_EV (23.060549)
 #endif
 
+/* transcendental constant pi */
+#if !defined(PI)
+  #if defined(M_PI)
+    /* GNU C library (libc), defined in math.h */
+    #define PI (M_PI)
+  #else
+    #define PI (3.14159265)
+  #endif
+#endif
 /* Coulomb energy conversion */
 #if !defined(C_ELE)
   #define C_ELE (332.06371)
 #endif
 /* Boltzmann constant */
 #if !defined(K_B)
-/* in ??? */
+  /* in ??? */
 //  #define K_B (503.398008)
-/* Boltzmann constant, AMU * A^2 / (ps^2 * K) */
+  /* Boltzmann constant, AMU * A^2 / (ps^2 * K) */
 //  #define K_B (0.831687)
   #define K_B (0.8314510)
 #endif
 /* unit conversion for atomic force */
 #if !defined(F_CONV)
-/* to AMU * A / ps^2 */
+  /* to AMU * A / ps^2 */
   #define F_CONV (1.0e6 / 48.88821291 / 48.88821291)
 #endif
 /* unit conversion for atomic energy */
 #if !defined(E_CONV)
-/* AMU * Angstroms^2 / ps^2 --> kcal / mol */
-  #define E_CONV (0.002391)
+  /* AMU * Angstroms^2 / ps^2 --> kcal / mol */
+//  #define E_CONV (0.002391)
+  #define E_CONV (1.0 / 418.40)
 #endif
 /* energy conversion constant from electron volts to kilo-calories per mole */
 #if !defined(EV_to_KCALpMOL)
@@ -310,61 +308,67 @@
 
 /**************** RESOURCE CONSTANTS **********************/
 #if defined(HAVE_HIP)
-/* BLOCK SIZES for kernels */
+  /* BLOCK SIZES for kernels */
   #define HB_SYM_BLOCK_SIZE (64)
   #define HB_KER_SYM_THREADS_PER_ATOM (16)
   #define HB_POST_PROC_BLOCK_SIZE (256)
   #define HB_POST_PROC_KER_THREADS_PER_ATOM (64)
-
+  
   #if defined(__INIT_BLOCK_SIZE__)
-/* all utility functions and all */
+    /* all utility functions and all */
     #define DEF_BLOCK_SIZE (__INIT_BLOCK_SIZE__)
   #else
-/* all utility functions and all */
+    /* all utility functions and all */
     #define DEF_BLOCK_SIZE (256)
   #endif
-
+  
   #if defined( __NBRS_THREADS_PER_ATOM__ )
     #define NB_KER_THREADS_PER_ATOM __NBRS_THREADS_PER_ATOM__
   #else
     #define NB_KER_THREADS_PER_ATOM (32)
   #endif
-
+  
   #if defined( __NBRS_BLOCK_SIZE__)
     #define NBRS_BLOCK_SIZE __NBRS_BLOCK_SIZE__
   #else
     #define NBRS_BLOCK_SIZE (256)
   #endif
-
+  
   #if defined( __HB_THREADS_PER_ATOM__)
     #define HB_KER_THREADS_PER_ATOM __HB_THREADS_PER_ATOM__
   #else
     #define HB_KER_THREADS_PER_ATOM (64)
   #endif
-
+  
   #if defined(__HB_BLOCK_SIZE__)
     #define HB_BLOCK_SIZE __HB_BLOCK_SIZE__
   #else
     #define HB_BLOCK_SIZE (256)
   #endif
-
+  
   #if defined( __VDW_THREADS_PER_ATOM__ )
     #define VDW_KER_THREADS_PER_ATOM __VDW_THREADS_PER_ATOM__
   #else
     #define VDW_KER_THREADS_PER_ATOM (64)
   #endif
-
+  
   #if defined( __VDW_BLOCK_SIZE__)
     #define VDW_BLOCK_SIZE __VDW_BLOCK_SIZE__
   #else
     #define VDW_BLOCK_SIZE (256)
   #endif
+
+  /* max. num. of CUDA events used for synchronizing streams */
+  #define MAX_HIP_STREAM_EVENTS (4)
 #endif
+
+/* max. num. of active CUDA streams */
+#define MAX_HIP_STREAMS (5)
 
 
 /* ensemble type */
 enum ensemble
-        {
+{
     /* microcanonical ensemble */
     NVE = 0,
     /* Berendsen NVT ensemble */
@@ -379,11 +383,11 @@ enum ensemble
     NPT = 5,
     /* total number of ensemble types */
     ens_N = 6,
-    };
+};
 
 /* interaction list mapping from type to index */
 enum lists
-        {
+{
     /* far neighbor list */
     FAR_NBRS = 0,
     /* bond list */
@@ -393,38 +397,38 @@ enum lists
     /* 3-body list */
     THREE_BODIES = 3,
 #if defined(TEST_FORCES)
-/* derivative bond order list */
-DBOS = 4,
-/* derivative delta list */
-DDELTAS = 5,
-/* total number of list types */
-LIST_N = 6,
+    /* derivative bond order list */
+    DBOS = 4,
+    /* derivative delta list */
+    DDELTAS = 5,
+    /* total number of list types */
+    LIST_N = 6,
 #else
-/* total number of list types */
-LIST_N = 4,
+    /* total number of list types */
+    LIST_N = 4,
 #endif
 };
 
 /* interaction type */
 enum interactions
-        {
+{
     TYP_VOID = 0,
     TYP_FAR_NEIGHBOR = 1,
     TYP_BOND = 2,
     TYP_HBOND = 3,
     TYP_THREE_BODY = 4,
 #if defined(TEST_FORCES)
-TYP_DBO = 5,
-TYP_DDELTA = 6,
-TYP_N = 7,
+    TYP_DBO = 5,
+    TYP_DDELTA = 6,
+    TYP_N = 7,
 #else
-TYP_N = 5,
+    TYP_N = 5,
 #endif
 };
 
 /* MPI message tags */
 enum message_tags
-        {
+{
     INIT = 0,
     UPDATE = 1,
     BNDRY = 2,
@@ -441,11 +445,11 @@ enum message_tags
     ANGLE_LINES = 13,
     RESTART_ATOMS = 14,
     TAGS_N = 15,
-    };
+};
 
 /* error codes for simulation termination */
 enum errors
-        {
+{
     FILE_NOT_FOUND = -10,
     UNKNOWN_ATOM_TYPE = -11,
     CANNOT_OPEN_FILE = -12,
@@ -457,38 +461,38 @@ enum errors
     NUMERIC_BREAKDOWN = -18,
     MAX_RETRIES_REACHED = -19,
     RUNTIME_ERROR = -20,
-    };
+};
 
 /* restart file format */
 enum restart_formats
-        {
+{
     WRITE_ASCII = 0,
     WRITE_BINARY = 1,
     RF_N = 2,
-    };
+};
 
 /* geometry file format */
 enum geo_formats
-        {
+{
     CUSTOM = 0,
     PDB = 1,
     BGF = 2,
     ASCII_RESTART = 3,
     BINARY_RESTART = 4,
     GF_N = 5,
-    };
+};
 
 /* method for computing atomic charges */
 enum charge_method
-        {
+{
     QEQ_CM = 0,
     EE_CM = 1,
     ACKS2_CM = 2,
-    };
+};
 
 /* linear solver type used in charge method */
 enum solver
-        {
+{
     GMRES_S = 0,
     GMRES_H_S = 1,
     CG_S = 2,
@@ -496,11 +500,11 @@ enum solver
     BiCGStab_S = 4,
     PIPECG_S = 5,
     PIPECR_S = 6,
-    };
+};
 
 /* preconditioner computation type for charge method linear solver */
 enum pre_comp
-        {
+{
     NONE_PC = 0,
     JACOBI_PC = 1,
     ICHOLT_PC = 2,
@@ -508,21 +512,21 @@ enum pre_comp
     ILUTP_PC = 4,
     FG_ILUT_PC = 5,
     SAI_PC = 6,
-    };
+};
 
 /* preconditioner application type for ICHOL/ILU preconditioners,
  * used for charge method linear solver */
 enum pre_app
-        {
+{
     TRI_SOLVE_PA = 0,
     TRI_SOLVE_LEVEL_SCHED_PA = 1,
     TRI_SOLVE_GC_PA = 2,
     JACOBI_ITER_PA = 3,
-    };
+};
 
 /* ??? */
 enum gcell_types
-        {
+{
     NO_NBRS = 0,
     NEAR_ONLY = 1,
     HBOND_ONLY = 2,
@@ -533,46 +537,46 @@ enum gcell_types
     FULL_NBRS = 7,
     NATIVE = 8,
     NT_NBRS = 9, // 9 through 14
-        };
+};
 
 /* atom types as pertains to hydrogen bonding */
 enum hydrogen_bonding_atom_types
-        {
+{
     NON_H_BONDING_ATOM = 0,
     H_ATOM = 1,
     H_BONDING_ATOM = 2,
-    };
+};
 
 /* interaction list (reax_list) storage format */
 enum reax_list_format
-        {
+{
     /* store half of interactions, when i < j (atoms i and j) */
     HALF_LIST = 0,
     /* store all interactions */
     FULL_LIST = 1,
-    };
+};
 
 /* sparse matrix (sparse_matrix) storage format */
 enum sparse_matrix_format
-        {
+{
     /* store upper half of nonzeros in a symmetric matrix (a_{ij}, i >= j) */
     SYM_HALF_MATRIX = 0,
     /* store all nonzeros in a symmetric matrix */
     SYM_FULL_MATRIX = 1,
     /* store all nonzeros in a matrix */
     FULL_MATRIX = 2,
-    };
+};
 
 /* trajectory file formats */
 enum traj_methods
-        {
+{
     /* write trajectory file using standard I/O */
     REG_TRAJ = 0,
     /* write trajectory file using MPI I/O */
     MPI_TRAJ = 1,
     /* num. trajectory file formats */
     TF_N = 2,
-    };
+};
 
 
 /* 3D vector, integer values */
@@ -637,7 +641,7 @@ typedef struct LR_data LR_data;
 typedef struct cubic_spline_coef cubic_spline_coef;
 typedef struct LR_lookup_table LR_lookup_table;
 #if defined(LAMMPS_REAX)
-typedef struct fix_qeq_gpu fix_qeq_gpu;
+    typedef struct fix_qeq_gpu fix_qeq_gpu;
 #endif
 typedef struct puremd_handle puremd_handle;
 
@@ -670,7 +674,7 @@ typedef void (*callback_function)( reax_atom * const, simulation_data * const,
 /* struct definitions */
 /* header used in restart file */
 struct restart_header
-        {
+{
     /* current simulation time step */
     int step;
     /* total num. atoms in simulation */
@@ -687,12 +691,12 @@ struct restart_header
     real G_xi;
     /* ??? */
     rtensor box;
-        };
+};
 
 
 /* atom type used for restarting simulation */
 struct restart_atom
-        {
+{
     /* atom serial number as given in the geo file */
     int orig_id;
     /* non-negative integer used to indicate atom type,
@@ -705,12 +709,12 @@ struct restart_atom
     rvec x;
     /* atomic velocity, 3D */
     rvec v;
-        };
+};
 
 
 /* atom type used for MPI communications */
 struct mpi_atom
-        {
+{
     /* atom serial number as given in the geo file */
     int orig_id;
     /* local atom ID on neighbor processor ??? */
@@ -737,12 +741,12 @@ struct mpi_atom
     /* atomic fictitious charge used during QEq to compute atomic charge,
      * multiple entries used to hold old values for extrapolation */
     rvec4 t;
-        };
+};
 
 
 /* atom type used for MPI communications at boundary regions */
 struct boundary_atom
-        {
+{
     /* atom serial number as given in the geo file */
     int orig_id;
     /* local atom ID on neighbor processor ??? */
@@ -757,12 +761,12 @@ struct boundary_atom
     int num_hbonds;
     /* atomic position, 3D */
     rvec x;
-        };
+};
 
 
 /**/
 struct mpi_out_data
-        {
+{
     /* num. of elements currently contained in the egress buffer */
     int cnt;
     /* mapping between elements of egress buffer and another buffer */
@@ -773,12 +777,12 @@ struct mpi_out_data
     void *out_atoms;
     /* size of egress buffer, in bytes */
     size_t out_atoms_size;
-        };
+};
 
 
 /**/
 struct mpi_datatypes
-        {
+{
     /* communicator for neighboring processes in 3D Cartesian mesh topology */
     MPI_Comm comm_mesh3D;
     /* MPI datatype for mpi_atom */
@@ -837,7 +841,7 @@ struct mpi_datatypes
      * 3D Cartesian topology (GPU) */
     mpi_out_data d_out_buffers[MAX_NBRS];
 #endif
-        };
+};
 
 
 /* Global parameters in force field parameters file, mapping:
@@ -883,7 +887,7 @@ struct mpi_datatypes
  * l[38] = p_coa3
  * */
 struct global_parameters
-        {
+{
     /* num. of global parameters, from the force field file */
     int n_global;
     /* global parameters, see above mapping */
@@ -895,12 +899,12 @@ struct global_parameters
      * 3: inner wall + shielding
      * */
     int vdw_type;
-        };
+};
 
 
 /* single body parameters in force field parameters file */
 struct single_body_parameters
-        {
+{
     /* Line one in field file */
     /* two character atom name */
     char name[15];
@@ -972,13 +976,13 @@ struct single_body_parameters
     real ecore2;
     /**/
     real acore2;
-        };
+};
 
 
 /* 2-body parameters for a single interaction type,
  * from the force field parameters file */
 struct two_body_parameters
-        {
+{
     /* Bond Order parameters */
     /**/
     real p_bo1;
@@ -1045,13 +1049,13 @@ struct two_body_parameters
     real v13cor;
     /**/
     real ovc;
-        };
+};
 
 
 /* 3-body parameters for a single interaction type,
  * from the force field parameters file */
 struct three_body_parameters
-        {
+{
     /* valence angle */
     real theta_00;
     real p_val1, p_val2, p_val4, p_val7;
@@ -1061,22 +1065,22 @@ struct three_body_parameters
 
     /* 3-body conjugation */
     real p_coa1;
-        };
+};
 
 
 /* three body interactions info. */
 struct three_body_header
-        {
+{
     /* num. of three body parameters */
     int cnt;
     /* collection of three body parameters, indexed by atomic types */
     three_body_parameters prm[MAX_3BODY_PARAM];
-        };
+};
 
 
 /* hydrogen bond parameters in force field parameters file */
 struct hbond_parameters
-        {
+{
     /**/
     real r0_hb;
     /**/
@@ -1085,13 +1089,13 @@ struct hbond_parameters
     real p_hb2;
     /**/
     real p_hb3;
-        };
+};
 
 
 /* 4-body parameters for a single interaction type,
  * from the force field parameters file */
 struct four_body_parameters
-        {
+{
     /**/
     real V1;
     /**/
@@ -1104,22 +1108,22 @@ struct four_body_parameters
 
     /* 4-body conjugation */
     real p_cot1;
-        };
+};
 
 
 /* four body interactions info. */
 struct four_body_header
-        {
+{
     /* num. of four body parameters */
     int cnt;
     /* collection of four body parameters, indexed by atomic types */
     four_body_parameters prm[MAX_4BODY_PARAM];
-        };
+};
 
 
 /* atomic interaction parameters */
 struct reax_interaction
-        {
+{
     /* num. of atom types, from force field parameters file */
     int num_atom_types;
 
@@ -1128,13 +1132,13 @@ struct reax_interaction
     /* simulation parameters for single body interactions */
     single_body_parameters *sbp;
     /* simulation parameters for two body interactions */
-    two_body_parameters *tbp;
+    two_body_parameters *tbp; 
     /* simulation parameters for three body interactions */
-    three_body_header *thbp;
+    three_body_header *thbp; 
     /* simulation parameters for hydrogen bonding interactions */
-    hbond_parameters *hbp;
+    hbond_parameters *hbp; 
     /* simulation parameters for four body interactions */
-    four_body_header *fbp;
+    four_body_header *fbp; 
 
 #if defined(HAVE_HIP)
     /* global simulation parameters (GPU), from force field parameters file */
@@ -1150,12 +1154,12 @@ struct reax_interaction
     /* simulation parameters for four body interactions (GPU) */
     four_body_header *d_fbp;
 #endif
-        };
+};
 
 
 /**/
 struct reax_atom
-        {
+{
     /* atom serial number as given in the geo file */
     int orig_id;
     /* local atom ID on neighbor processor ??? */
@@ -1197,12 +1201,12 @@ struct reax_atom
     /**/
     int pos;
 #endif
-        };
+};
 
 
 /* Info. regarding 3D simulation space */
 struct simulation_box
-        {
+{
     /* total volume */
     real V;
     /* min. coordinate of box in Angstroms, 3D */
@@ -1222,12 +1226,12 @@ struct simulation_box
     rtensor trans_inv;
     /* ??? */
     rtensor g;
-        };
+};
 
 
 /**/
 struct grid_cell
-        {
+{
     /* min. cell coordinates */
     rvec min;
     /* max. cell coordinates */
@@ -1240,13 +1244,13 @@ struct grid_cell
     int top;
     /* IDs of atoms within this grid cell */
     int* atoms;
-        };
+};
 
 
 /* info. for 3D domain (i.e., spatial) partitioning of atoms
  * inside a processor's portion (local and ghost regoin) of the simulation box */
 struct grid
-        {
+{
     /* total number of grid cells (native AND ghost) */
     int total;
     /* max. num. of atoms a grid cell can contain */
@@ -1300,12 +1304,12 @@ struct grid
     rvec *nbrs_cp;
     /**/
     ivec *rel_box;
-        };
+};
 
 
 /**/
 struct neighbor_proc
-        {
+{
     /* MPI rank of neighbor MPI process */
     int rank;
     /* index to beginning of atom list for atom's
@@ -1320,24 +1324,24 @@ struct neighbor_proc
     rvec bndry_min;
     /**/
     rvec bndry_max;
-        };
+};
 
 
 /**/
 struct bound_estimate
-        {
+{
     /**/
     int N;
     /**/
     int exc_gcells;
     /**/
     int exc_atoms;
-        };
+};
 
 
 /**/
 struct boundary_cutoff
-        {
+{
     /**/
     real ghost_nonb;
     /**/
@@ -1346,12 +1350,12 @@ struct boundary_cutoff
     real ghost_bond;
     /**/
     real ghost_cutoff;
-        };
+};
 
 
 /**/
 struct reax_system
-        {
+{
     /* atomic interaction parameters */
     reax_interaction reax_param;
     /* num. atoms (locally owned) within spatial domain of MPI process */
@@ -1359,7 +1363,7 @@ struct reax_system
     /* num. atoms (locally owned AND ghost region) within spatial domain of MPI process */
     int N;
     /* num. atoms within simulation */
-    int64_t bigN;
+    int bigN;
     /* dimension of locally owned part of sparse charge matrix */
     int n_cm;
     /* num. hydrogen atoms */
@@ -1474,29 +1478,20 @@ struct reax_system
     int total_thbodies;
     /* total num. three body interactions (GPU) */
     int *d_total_thbodies;
-
-    class LAMMPS_NS::Error *error_ptr;
-    class LAMMPS_NS::Pair *pair_ptr;
-    int my_bonds;
-    int mincap;
-    double safezone, saferzone;
-    int gcell_cap;
-    int wsize;
-    // LR_lookup_table **LR;
-
-    int omp_active;
-        };
+};
 
 
 /* system control parameters */
 struct control_params
-        {
+{
     /* simulation name, as supplied via control file */
     char sim_name[MAX_STR];
     /* number of MPI processors, as supplied via control file */
     int nprocs;
     /* number of GPUs per node, as supplied via control file */
     int gpus_per_node;
+    /* number of HIP streams per GPU, as supplied via control file */
+    int gpu_streams;
     /* MPI processors per each simulation dimension (cartesian topology),
      * as supplied via control file */
     ivec procs_by_dim;
@@ -1552,8 +1547,6 @@ struct control_params
     /* three body interaction cutoff, as supplied by control file, in Angstroms */
     real thb_cut;
 
-    real thb_cutsq;
-
     /* flag to control if force computations are tablulated */
     int tabulate;
 
@@ -1604,6 +1597,8 @@ struct control_params
     /* num. of iterations used to apply preconditioner via
      * Jacobi relaxation scheme (truncated Neumann series) */
     unsigned int cm_solver_pre_app_jacobi_iters;
+    /* TRUE if polarization energy calculation is enabled, FALSE otherwise */
+    unsigned int polarization_energy_enabled;
 
     /* initial temperature of simulation, in Kelvin */
     real T_init;
@@ -1655,14 +1650,6 @@ struct control_params
     /* function pointers for bonded interactions */
     interaction_function intr_funcs[NUM_INTRS];
 
-#if defined(LAMMPS_REAX)
-    int lgflag;
-    int enobondsflag;
-    class LAMMPS_NS::Error *error_ptr;
-    int me;
-    int nthreads;
-#endif
-
 #if defined(HAVE_HIP)
     /* function pointer for ensemble used to evolve atomic system (GPU) */
     evolve_function Hip_Evolve;
@@ -1682,12 +1669,16 @@ struct control_params
     /* num. of CUDA blocks rounded up to the nearest power of 2
      * for kernels with 1 thread per atom (local AND ghost) */
     int blocks_pow_2_n;
+    /* HIP streams */
+    hipStream_t streams[MAX_HIP_STREAMS];
+    /* HIP events for synchronizing streams */
+    hipEvent_t stream_events[MAX_HIP_STREAM_EVENTS];
 #endif
-        };
+};
 
 
 struct thermostat
-        {
+{
     /**/
     real T;
     /**/
@@ -1699,11 +1690,11 @@ struct thermostat
     /**/
     real G_xi;
 
-        };
+};
 
 
 struct isotropic_barostat
-        {
+{
     /**/
     real P;
     /**/
@@ -1715,11 +1706,11 @@ struct isotropic_barostat
     /**/
     real a_eps;
 
-        };
+};
 
 
 struct flexible_barostat
-        {
+{
     /**/
     rtensor P;
     /**/
@@ -1743,11 +1734,11 @@ struct flexible_barostat
     /**/
     rtensor a_g0;
 
-        };
+};
 
 
 struct reax_timing
-        {
+{
     /* simulation start time */
     real start;
     /* total simulation time */
@@ -1800,11 +1791,11 @@ struct reax_timing
     real last_nbrs;
     /* num. of retries in main sim. loop */
     int num_retries;
-        };
+};
 
 
 struct energy_data
-        {
+{
     /* total energy */
     real e_tot;
     /* kinetic energy */
@@ -1837,12 +1828,12 @@ struct energy_data
     real e_ele;
     /* polarization energy */
     real e_pol;
-        };
+};
 
 
 /**/
 struct simulation_data
-        {
+{
     /**/
     int step;
     /**/
@@ -1911,12 +1902,12 @@ struct simulation_data
     reax_timing d_timing;
     /**/
     void *d_simulation_data;
-        };
+};
 
 
 /**/
 struct three_body_interaction_data
-        {
+{
     /**/
     int thb;
     /* pointer to the third body on the central atom's nbrlist */
@@ -1931,12 +1922,12 @@ struct three_body_interaction_data
     rvec dcos_dj;
     /**/
     rvec dcos_dk;
-        };
+};
 
 
 /* info. about a far neighbor to an atom */
 struct far_neighbor_data
-        {
+{
     /* atom ID of neighbor */
     int *nbr;
     /* sets of three integers which deterimine if a neighbor
@@ -1947,40 +1938,40 @@ struct far_neighbor_data
     real *d;
     /* differences between positions of atom and its neighboring atom */
     rvec *dvec;
-        };
+};
 
 
 /**/
 struct hbond_data
-        {
+{
     /* neighbor atom ID */
     int nbr;
     /**/
     int scl;
     /* position of neighbor in far neighbor list */
     int ptr;
-#if defined(HAVE_HIP) && !defined(CUDA_ACCUM_ATOMIC)
+#if defined(HAVE_HIP) && !defined(HIP_ACCUM_ATOMIC)
     /**/
     int sym_index;
     /**/
     rvec hb_f;
 #endif
-        };
+};
 
 
 /**/
 struct dDelta_data
-        {
+{
     /**/
     int wrt;
     /**/
     rvec dVal;
-        };
+};
 
 
 /**/
 struct dbond_data
-        {
+{
     /**/
     int wrt;
     /**/
@@ -1989,12 +1980,12 @@ struct dbond_data
     rvec dBOpi;
     /**/
     rvec dBOpi2;
-        };
+};
 
 
 /**/
 struct bond_order_data
-        {
+{
     /**/
     real BO;
     /**/
@@ -2039,12 +2030,12 @@ struct bond_order_data
     rvec dln_BOp_pi;
     /**/
     rvec dln_BOp_pi2;
-        };
+};
 
 
 /**/
 struct bond_data
-        {
+{
     /* local atom ID of neighboring bonded atom */
     int nbr;
     /* index in the bonds list of neighboring atom */
@@ -2053,7 +2044,7 @@ struct bond_data
     int dbond_index;
     /**/
     ivec rel_box;
-    //  rvec ext_factor;
+//  rvec ext_factor;
     /* distance to neighboring atom */
     real d;
     /* component-wise difference of coordinates of this atom
@@ -2061,7 +2052,7 @@ struct bond_data
     rvec dvec;
     /* bond order data */
     bond_order_data bo_data;
-#if defined(HAVE_HIP) && !defined(CUDA_ACCUM_ATOMIC)
+#if defined(HAVE_HIP) && !defined(HIP_ACCUM_ATOMIC)
     /**/
     real ae_CdDelta;
     /**/
@@ -2079,7 +2070,7 @@ struct bond_data
     /**/
     rvec tf_f;
 #endif
-        };
+};
 
 
 /* Matrix in compressed row storage (CRS) format,
@@ -2088,7 +2079,7 @@ struct bond_data
  *   http://netlib.org/linalg/html_templates/node91.html#SECTION00931100000000000000
  */
 struct sparse_matrix
-        {
+{
     /* 0 if struct members are NOT allocated, 1 otherwise */
     int allocated;
     /* matrix storage format */
@@ -2111,12 +2102,12 @@ struct sparse_matrix
     int *j;
     /* matrix entries */
     real *val;
-        };
+};
 
 
 /* used to determine if and how much space should be reallocated */
 struct reallocate_data
-        {
+{
     /* TRUE if far neighbor list needs
      * to be reallocated, FALSE otherwise */
     int far_nbrs;
@@ -2134,11 +2125,11 @@ struct reallocate_data
     int thbody;
     /**/
     int gcell_atoms;
-        };
+};
 
 
 struct storage
-        {
+{
     /* bond order related storage */
     /**/
     real *total_bond_order;
@@ -2344,15 +2335,15 @@ struct storage
     /* size of temporary host workspace, in bytes */
     size_t host_scratch_size;
     /* temporary workspace (GPU) */
-    void *scratch;
+    void *scratch[MAX_HIP_STREAMS];
     /* size of temporary workspace (GPU), in bytes */
-    size_t scratch_size;
+    size_t scratch_size[MAX_HIP_STREAMS];
     /* lookup table for force tabulation (GPU) */
     LR_lookup_table *d_LR;
     /* storage (GPU) */
     storage *d_workspace;
 #endif
-        };
+};
 
 
 /* Union used for determining interaction list type */
@@ -2377,7 +2368,7 @@ struct storage
 
 /* Interaction list */
 struct reax_list
-        {
+{
     /* 0 if struct members are NOT allocated, 1 otherwise */
     int allocated;
     /* total num. of entities, each of which correspond to zero or more interactions */
@@ -2393,7 +2384,7 @@ struct reax_list
     /* interaction list type, as defined by interactions enum above */
     int type;
     /* interaction list, made purposely non-opaque via above union to avoid typecasts */
-    //    list_type select;
+//    list_type select;
     /* list storage format (half or full) */
     int format;
     /* void type */
@@ -2410,13 +2401,13 @@ struct reax_list
     far_neighbor_data far_nbr_list;
     /* hydrogen bond type */
     hbond_data *hbond_list;
-        };
+};
 
 
 /**/
 struct output_controls
-        {
-#if (defined(PURE_REAX) || defined (LAMMPS_REAX))
+{
+#if defined(PURE_REAX)
     /**/
     MPI_File trj;
 #endif
@@ -2556,24 +2547,24 @@ struct output_controls
     /* near neighbor list */
     FILE *nlist;
 #endif
-        };
+};
 
 
 /**/
 struct molecule
-        {
+{
     /**/
     int atom_count;
     /**/
     int atom_list[MAX_MOLECULE_SIZE];
     /**/
     int mtypes[MAX_ATOM_TYPES];
-        };
+};
 
 
 /**/
 struct LR_data
-        {
+{
     /**/
     real H;
     /**/
@@ -2584,12 +2575,12 @@ struct LR_data
     real e_ele;
     /**/
     real CEclmb;
-        };
+};
 
 
 /* coefficients for cublic spline interpolation */
 struct cubic_spline_coef
-        {
+{
     /**/
     real a;
     /**/
@@ -2598,13 +2589,13 @@ struct cubic_spline_coef
     real c;
     /**/
     real d;
-        };
+};
 
 
 /* struct containing lookup table for pairwise atomic interactions
  * based on atomic distance */
 struct LR_lookup_table
-        {
+{
     /* min. distance between atom pairs contained in lookup table */
     real xmin;
     /* max. distance between atom pairs contained in lookup table */
@@ -2634,7 +2625,7 @@ struct LR_lookup_table
     cubic_spline_coef *ele;
     /* spline coefficients for Coulomb interactions */
     cubic_spline_coef *CEclmb;
-        };
+};
 
 #if defined(LAMMPS_REAX)
 struct fix_qeq_gpu {
@@ -2699,7 +2690,7 @@ struct fix_qeq_gpu {
 
 /* Handle for working with an instance of the PuReMD library */
 struct puremd_handle
-        {
+{
     /* System info. struct pointer */
     reax_system *system;
     /* System struct pointer */

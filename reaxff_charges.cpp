@@ -19,21 +19,24 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#if defined(PURE_REAX)
-    #include "charges.h"
-    #include "allocate.h"
-    #include "basic_comm.h"
-    #include "comm_tools.h"
-    #include "io_tools.h"
-    #include "lin_alg.h"
-    #include "tool_box.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
+    #include "reaxff_charges.h"
+
     #include "reaxff_allocate.h"
     #include "reaxff_basic_comm.h"
     #include "reaxff_comm_tools.h"
     #include "reaxff_io_tools.h"
     #include "reaxff_lin_alg.h"
     #include "reaxff_tool_box.h"
+#else
+    #include "charges.h"
+
+    #include "allocate.h"
+    #include "basic_comm.h"
+    #include "comm_tools.h"
+    #include "io_tools.h"
+    #include "lin_alg.h"
+    #include "tool_box.h"
 #endif
 
 
@@ -258,31 +261,36 @@ static void Compute_Preconditioner_QEq( reax_system const * const system,
         mpi_datatypes const * const mpi_data )
 {
     int i;
+#if defined(LOG_PERFORMANCE)
+    real time;
+#endif
 #if defined(HAVE_LAPACKE) || defined(HAVE_LAPACKE_MKL)
     int ret;
-    real t_pc;
 #endif
 
     if ( control->cm_solver_pre_comp_type == JACOBI_PC )
     {
-        for ( i = 0; i < system->n; ++i )
-        {
-            workspace->Hdia_inv[i] = 1.0 / system->reax_param.sbp[ system->my_atoms[i].type ].eta;
-        }
+#if defined(LOG_PERFORMANCE)
+        time = Get_Time( );
+#endif
+
+        jacobi( &workspace->H, workspace->Hdia_inv );
     }
     else if ( control->cm_solver_pre_comp_type == SAI_PC )
     {
 #if defined(HAVE_LAPACKE) || defined(HAVE_LAPACKE_MKL)
-        t_pc = sparse_approx_inverse( system, data, workspace, mpi_data,
+        time = sparse_approx_inverse( system, data, workspace, mpi_data,
                 &workspace->H, &workspace->H_spar_patt, &workspace->H_app_inv,
                 control->nprocs );
-
-        data->timing.cm_solver_pre_comp += t_pc;
 #else
         fprintf( stderr, "[ERROR] LAPACKE support disabled. Re-compile before enabling. Terminating...\n" );
         exit( INVALID_INPUT );
 #endif
     }
+
+#if defined(LOG_PERFORMANCE)
+    Update_Timing_Info( &time, &data->timing.cm_solver_pre_comp );
+#endif
 }
 
 
@@ -311,7 +319,7 @@ static void Calculate_Charges_QEq( reax_system const * const system,
     rvec2 my_sum, all_sum;
     reax_atom *atom;
 
-    q = static_cast<real*>(smalloc( sizeof(real) * system->N, "Calculate_Charges_QEq::q" ));
+    q = static_cast<real*>(smalloc( sizeof(real) * system->N, __FILE__, __LINE__ ));
 
     my_sum[0] = 0.0;
     my_sum[1] = 0.0;
@@ -377,7 +385,7 @@ static void Calculate_Charges_QEq( reax_system const * const system,
         system->my_atoms[i].q = q[i];
     }
 
-    sfree( q, "Calculate_Charges_QEq::q" );
+    sfree( q, __FILE__, __LINE__ );
 }
 
 
@@ -407,11 +415,12 @@ static void QEq( reax_system const * const system, control_params const * const 
         output_controls const * const out_control,
         mpi_datatypes * const mpi_data )
 {
-    int iters;
+    int iters, refactor;
 
     iters = 0;
+    refactor = is_refactoring_step( control, data );
 
-    if ( is_refactoring_step( control, data ) == TRUE )
+    if ( refactor == TRUE )
     {
         Setup_Preconditioner_QEq( system, control, data, workspace, mpi_data );
 
@@ -458,71 +467,65 @@ static void QEq( reax_system const * const system, control_params const * const 
     case CG_S:
 #if defined(DUAL_SOLVER)
         iters = dual_CG( system, control, data, workspace, &workspace->H, workspace->b,
-                control->cm_solver_q_err, workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->x, mpi_data, refactor );
 #else
         iters = CG( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
 
         iters += CG( system, control, data, workspace, &workspace->H, workspace->b_t,
-                control->cm_solver_q_err, workspace->t, mpi_data );
+                control->cm_solver_q_err, workspace->t, mpi_data, FALSE );
 #endif
         break;
 
     case SDM_S:
 #if defined(DUAL_SOLVER)
-        fprintf( stderr, "[ERROR] Dual SDM solver for QEq not yet implemented. Terminating...\n" );
-        exit( INVALID_INPUT );
-//        iters = dual_SDM( system, control, data, workspace, &workspace->H, workspace->b,
-//                control->cm_solver_q_err, workspace->x, mpi_data );
+        iters = dual_SDM( system, control, data, workspace, &workspace->H, workspace->b,
+                control->cm_solver_q_err, workspace->x, mpi_data, refactor );
 #else
         iters = SDM( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
 
         iters += SDM( system, control, data, workspace, &workspace->H, workspace->b_t,
-                control->cm_solver_q_err, workspace->t, mpi_data );
+                control->cm_solver_q_err, workspace->t, mpi_data, FALSE );
 #endif
         break;
 
     case BiCGStab_S:
 #if defined(DUAL_SOLVER)
-        fprintf( stderr, "[ERROR] Dual BiCGStab solver for QEq not yet implemented. Terminating...\n" );
-        exit( INVALID_INPUT );
-//        iters = dual_BiCGStab( system, control, data, workspace, &workspace->H, workspace->b,
-//                control->cm_solver_q_err, workspace->x, mpi_data );
+        iters = dual_BiCGStab( system, control, data, workspace, &workspace->H, workspace->b,
+                control->cm_solver_q_err, workspace->x, mpi_data, refactor );
 #else
         iters = BiCGStab( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
 
         iters += BiCGStab( system, control, data, workspace, &workspace->H, workspace->b_t,
-                control->cm_solver_q_err, workspace->t, mpi_data );
+                control->cm_solver_q_err, workspace->t, mpi_data, FALSE );
 #endif
         break;
 
     case PIPECG_S:
 #if defined(DUAL_SOLVER)
         iters = dual_PIPECG( system, control, data, workspace, &workspace->H, workspace->b,
-                control->cm_solver_q_err, workspace->x, mpi_data );
+                control->cm_solver_q_err, workspace->x, mpi_data, refactor );
 #else
         iters = PIPECG( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
 
         iters += PIPECG( system, control, data, workspace, &workspace->H, workspace->b_t,
-                control->cm_solver_q_err, workspace->t, mpi_data );
+                control->cm_solver_q_err, workspace->t, mpi_data, FALSE );
 #endif
         break;
 
     case PIPECR_S:
 #if defined(DUAL_SOLVER)
-        fprintf( stderr, "[ERROR] Dual PIPECR solver for QEq not yet implemented. Terminating...\n" );
-        exit( INVALID_INPUT );
-//        iters = dual_PIPECR( system, control, data, workspace, &workspace->H, workspace->b,
-//                control->cm_solver_q_err, workspace->x, mpi_data );
+        iters = dual_PIPECR( system, control, data, workspace, &workspace->H, workspace->b,
+                control->cm_solver_q_err, workspace->x, mpi_data, refactor );
 #else
         iters = PIPECR( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
 
         iters += PIPECR( system, control, data, workspace, &workspace->H, workspace->b_t,
-                control->cm_solver_q_err, workspace->t, mpi_data );
+                control->cm_solver_q_err, workspace->t, mpi_data, FALSE );
 #endif
         break;
 
@@ -552,11 +555,12 @@ static void EE( reax_system const * const system, control_params const * const c
         output_controls const * const out_control,
         mpi_datatypes * const mpi_data )
 {
-    int iters;
+    int iters, refactor;
 
     iters = 0;
+    refactor = is_refactoring_step( control, data );
 
-    if ( is_refactoring_step( control, data ) == TRUE )
+    if ( refactor == TRUE )
     {
         Setup_Preconditioner_EE( system, control, data, workspace, mpi_data );
 
@@ -602,27 +606,27 @@ static void EE( reax_system const * const system, control_params const * const c
 
     case CG_S:
         iters = CG( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case SDM_S:
         iters = SDM( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case BiCGStab_S:
         iters = BiCGStab( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case PIPECG_S:
         iters = PIPECG( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case PIPECR_S:
         iters = PIPECR( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     default:
@@ -651,11 +655,12 @@ static void ACKS2( reax_system const * const system, control_params const * cons
         output_controls const * const out_control,
         mpi_datatypes * const mpi_data )
 {
-    int iters;
+    int iters, refactor;
 
     iters = 0;
+    refactor = is_refactoring_step( control, data );
 
-    if ( is_refactoring_step( control, data ) == TRUE )
+    if ( refactor == TRUE )
     {
         Setup_Preconditioner_ACKS2( system, control, data, workspace, mpi_data );
 
@@ -701,27 +706,27 @@ static void ACKS2( reax_system const * const system, control_params const * cons
 
     case CG_S:
         iters = CG( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case SDM_S:
         iters = SDM( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case BiCGStab_S:
         iters = BiCGStab( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case PIPECG_S:
         iters = PIPECG( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     case PIPECR_S:
         iters = PIPECR( system, control, data, workspace, &workspace->H, workspace->b_s,
-                control->cm_solver_q_err, workspace->s, mpi_data );
+                control->cm_solver_q_err, workspace->s, mpi_data, refactor );
         break;
 
     default:

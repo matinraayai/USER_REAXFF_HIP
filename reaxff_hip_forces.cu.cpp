@@ -1,29 +1,5 @@
 #include "hip/hip_runtime.h"
-
-#if defined(PURE_REAX)
-    #include "hip_forces.h"
-
-    #include "hip_bonds.h"
-    #include "hip_bond_orders.h"
-    #include "hip_charges.h"
-    #include "hip_helpers.h"
-    #include "hip_hydrogen_bonds.h"
-    #include "hip_list.h"
-    #include "hip_multi_body.h"
-    #include "hip_neighbors.h"
-    #include "hip_nonbonded.h"
-    #include "hip_reduction.h"
-    #include "hip_spar_lin_alg.h"
-    #include "hip_torsion_angles.h"
-    #include "hip_utils.h"
-    #include "hip_valence_angles.h"
-
-    #include "../basic_comm.h"
-    #include "../forces.h"
-    #include "../index_utils.h"
-    #include "../tool_box.h"
-    #include "../vector.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_forces.h"
 
     #include "reaxff_hip_bonds.h"
@@ -46,7 +22,29 @@
     #include "reaxff_index_utils.h"
     #include "reaxff_tool_box.h"
     #include "reaxff_vector.h"
-    #include "reaxff_hip_nonbonded.h"
+#else
+    #include "hip_forces.h"
+
+    #include "hip_bonds.h"
+    #include "hip_bond_orders.h"
+    #include "hip_charges.h"
+    #include "hip_helpers.h"
+    #include "hip_hydrogen_bonds.h"
+    #include "hip_list.h"
+    #include "hip_multi_body.h"
+    #include "hip_neighbors.h"
+    #include "hip_nonbonded.h"
+    #include "hip_reduction.h"
+    #include "hip_spar_lin_alg.h"
+    #include "hip_torsion_angles.h"
+    #include "hip_utils.h"
+    #include "hip_valence_angles.h"
+
+    #include "../basic_comm.h"
+    #include "../forces.h"
+    #include "../index_utils.h"
+    #include "../tool_box.h"
+    #include "../vector.h"
 #endif
 
 #include <hipcub/hipcub.hpp>
@@ -61,8 +59,9 @@ typedef enum
 } MATRIX_ENTRY_POSITION;
 
 
-HIP_DEVICE real Init_Charge_Matrix_Entry( single_body_parameters *sbp_i, real *workspace_Tap,
-        control_params *control, int i, int j, real r_ij, real gamma, MATRIX_ENTRY_POSITION pos )
+HIP_DEVICE real Init_Charge_Matrix_Entry( single_body_parameters const * const sbp_i,
+        real const * const workspace_Tap, control_params const * const control,
+        int i, int j, real r_ij, real gamma, MATRIX_ENTRY_POSITION pos )
 {
     real Tap, dr3gamij_1, dr3gamij_3, ret;
 
@@ -82,7 +81,7 @@ HIP_DEVICE real Init_Charge_Matrix_Entry( single_body_parameters *sbp_i, real *w
                 Tap = Tap * r_ij + workspace_Tap[3];
                 Tap = Tap * r_ij + workspace_Tap[2];
                 Tap = Tap * r_ij + workspace_Tap[1];
-                Tap = Tap * r_ij + workspace_Tap[0];
+                Tap = Tap * r_ij + workspace_Tap[0];    
 
                 /* shielding */
                 dr3gamij_1 = r_ij * r_ij * r_ij
@@ -116,16 +115,15 @@ HIP_DEVICE real Init_Charge_Matrix_Entry( single_body_parameters *sbp_i, real *w
 }
 
 
-HIP_DEVICE real Init_Charge_Matrix_Entry_Tab( LR_lookup_table *t_LR, real r_ij,
+HIP_DEVICE real Init_Charge_Matrix_Entry_Tab( LR_lookup_table const * const t_LR, real r_ij,
         int ti, int tj, int num_atom_types )
 {
     int r, tmin, tmax;
     real val, dif, base;
-    LR_lookup_table *t; 
 
     tmin = MIN( ti, tj );
     tmax = MAX( ti, tj );
-    t = &t_LR[ index_lr(tmin,tmax, num_atom_types) ];
+    LR_lookup_table const * const t = &t_LR[ index_lr(tmin,tmax, num_atom_types) ];
 
     /* cubic spline interpolation */
     r = (int)(r_ij * t->inv_dx);
@@ -143,13 +141,14 @@ HIP_DEVICE real Init_Charge_Matrix_Entry_Tab( LR_lookup_table *t_LR, real r_ij,
 }
 
 
-HIP_GLOBAL void k_disable_hydrogen_bonding( control_params *control )
+HIP_GLOBAL void k_disable_hydrogen_bonding( control_params * const control )
 {
     control->hbond_cut = 0.0;
 }
 
 
-HIP_GLOBAL void k_init_end_index( int * intr_cnt, int *indices, int *end_indices, int N )
+HIP_GLOBAL void k_init_end_index( int const * const intr_cnt,
+        int const * const indices, int * const end_indices, int N )
 {
     int i;
 
@@ -164,8 +163,10 @@ HIP_GLOBAL void k_init_end_index( int * intr_cnt, int *indices, int *end_indices
 }
 
 
-HIP_GLOBAL void k_init_hbond_indices( reax_atom * atoms, single_body_parameters *sbp,
-        int *hbonds, int *max_hbonds, int *indices, int *end_indices, int N )
+HIP_GLOBAL void k_init_hbond_indices( reax_atom * const atoms,
+        single_body_parameters const * const sbp,
+        int const * const hbonds, int const * const max_hbonds,
+        int * const indices, int * const end_indices, int N )
 {
     int i, hindex, flag;
 
@@ -214,7 +215,8 @@ HIP_GLOBAL void k_print_hbond_info( reax_atom *my_atoms, single_body_parameters 
 /* 1 thread computes the distances and displacement vectors of an atom for its neighbors
  * in the far neighbors list if it's a NOT re-neighboring step
  */
-HIP_GLOBAL void k_init_dist( reax_atom *my_atoms, reax_list far_nbr_list, int N )
+HIP_GLOBAL void k_init_dist( reax_atom const * const my_atoms,
+        reax_list far_nbr_list, int N )
 {
     int i, j, pj, start_i, end_i;
     rvec x_i;
@@ -246,7 +248,8 @@ HIP_GLOBAL void k_init_dist( reax_atom *my_atoms, reax_list far_nbr_list, int N 
 /* 1 warp of threads computes the distances and displacement vectors of an atom for its neighbors
  * in the far neighbors list if it's a NOT re-neighboring step
  */
-HIP_GLOBAL void k_init_dist_opt( reax_atom *my_atoms, reax_list far_nbr_list, int N )
+HIP_GLOBAL void k_init_dist_opt( reax_atom const * const my_atoms,
+        reax_list far_nbr_list, int N )
 {
     int j, pj, start_i, end_i, thread_id, i, lane_id;
     rvec x_i;
@@ -278,6 +281,10 @@ HIP_GLOBAL void k_init_dist_opt( reax_atom *my_atoms, reax_list far_nbr_list, in
 
 
 
+/* Reinitialize all bond order data structures. This kernel is needed
+ * to make the bond list initialization an atomic transaction (which
+ * is needed for the computation / reallocation logic).
+ */
 HIP_GLOBAL void k_reset_bond_orders( storage workspace, int N )
 {
     int i;
@@ -297,20 +304,18 @@ HIP_GLOBAL void k_reset_bond_orders( storage workspace, int N )
 /* Compute the charge matrix entries and store the matrix in half format
  * using the far neighbors list (stored in full format) and according to
  * the full shell communication method */
-HIP_GLOBAL void k_init_cm_half_fs( reax_atom *my_atoms, single_body_parameters *sbp,
-        two_body_parameters *tbp, storage workspace, control_params *control, 
+HIP_GLOBAL void k_init_cm_half_fs( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
+        storage workspace, control_params const * const control,
         reax_list far_nbr_list, int num_atom_types,
-        int *max_cm_entries, int *realloc_cm_entries )
+        int * const max_cm_entries, int * const realloc_cm_entries )
 {
     int i, j, pj;
     int start_i, end_i;
-    int type_i, type_j;
+    int type_i, orig_id_i;
     int cm_top;
     int num_cm_entries;
     real r_ij;
-    single_body_parameters *sbp_i;
-    two_body_parameters *twbp;
-    reax_atom *atom_i, *atom_j;
     sparse_matrix *H;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -325,15 +330,14 @@ HIP_GLOBAL void k_init_cm_half_fs( reax_atom *my_atoms, single_body_parameters *
 
     if ( i < H->n )
     {
-        atom_i = &my_atoms[i];
-        type_i = atom_i->type;
+        type_i = my_atoms[i].type;
+        orig_id_i = my_atoms[i].orig_id;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
 
         /* diagonal entry in the matrix */
         H->j[cm_top] = i;
-        H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap, control,
+        H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap, control,
                 i, i, 0.0, 0.0, DIAGONAL );
         ++cm_top;
 
@@ -342,18 +346,16 @@ HIP_GLOBAL void k_init_cm_half_fs( reax_atom *my_atoms, single_body_parameters *
             if ( far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut )
             {
                 j = far_nbr_list.far_nbr_list.nbr[pj];
-                atom_j = &my_atoms[j];
-                type_j = atom_j->type;
 
                 /* if j is a local OR ghost atom in the upper triangular region of the matrix */
-                if ( atom_i->orig_id < atom_j->orig_id )
+                if ( orig_id_i < my_atoms[j].orig_id )
                 {
-                    twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
                     r_ij = far_nbr_list.far_nbr_list.d[pj];
 
                     H->j[cm_top] = j;
-                    H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap,
-                            control, i, H->j[cm_top], r_ij, twbp->gamma, OFF_DIAGONAL );
+                    H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap,
+                            control, i, H->j[cm_top], r_ij,
+                            tbp[ index_tbp(type_i, my_atoms[j].type, num_atom_types) ].gamma, OFF_DIAGONAL );
                     ++cm_top;
                 }
             }
@@ -376,10 +378,11 @@ HIP_GLOBAL void k_init_cm_half_fs( reax_atom *my_atoms, single_body_parameters *
 /* Compute the tabulated charge matrix entries and store the matrix in half format
  * using the far neighbors list (stored in full format) and according to
  * the full shell communication method */
-HIP_GLOBAL void k_init_cm_half_fs_tab( reax_atom *my_atoms, single_body_parameters *sbp,
-        storage workspace, control_params *control, 
-        reax_list far_nbr_list, LR_lookup_table *t_LR, int num_atom_types,
-        int *max_cm_entries, int *realloc_cm_entries )
+HIP_GLOBAL void k_init_cm_half_fs_tab( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp,
+        storage workspace, control_params const * const control,
+        reax_list far_nbr_list, LR_lookup_table const * const t_LR, int num_atom_types,
+        int * const max_cm_entries, int * const realloc_cm_entries )
 {
     int i, j, pj;
     int start_i, end_i;
@@ -387,7 +390,6 @@ HIP_GLOBAL void k_init_cm_half_fs_tab( reax_atom *my_atoms, single_body_paramete
     int cm_top;
     int num_cm_entries;
     real r_ij;
-    single_body_parameters *sbp_i;
     reax_atom *atom_i, *atom_j;
     sparse_matrix *H;
 
@@ -407,11 +409,10 @@ HIP_GLOBAL void k_init_cm_half_fs_tab( reax_atom *my_atoms, single_body_paramete
         type_i = atom_i->type;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
 
         /* diagonal entry in the matrix */
         H->j[cm_top] = i;
-        H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap, control,
+        H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap, control,
                 i, i, 0.0, 0.0, DIAGONAL );
         ++cm_top;
 
@@ -454,20 +455,18 @@ HIP_GLOBAL void k_init_cm_half_fs_tab( reax_atom *my_atoms, single_body_paramete
 /* Compute the charge matrix entries and store the matrix in full format
  * using the far neighbors list (stored in full format) and according to
  * the full shell communication method */
-HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms, single_body_parameters *sbp,
-        two_body_parameters *tbp, storage workspace, control_params *control,
+HIP_GLOBAL void k_init_cm_full_fs( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
+        storage workspace, control_params const * const control,
         reax_list far_nbr_list, int num_atom_types,
-        int *max_cm_entries, int *realloc_cm_entries )
+        int * const max_cm_entries, int * const realloc_cm_entries )
 {
     int i, j, pj;
     int start_i, end_i;
-    int type_i, type_j;
+    int type_i;
     int cm_top;
     int num_cm_entries;
-    real r_ij;
-    single_body_parameters *sbp_i;
-    two_body_parameters *twbp;
-    reax_atom *atom_i, *atom_j;
+    reax_atom *atom_i;
     sparse_matrix *H;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -486,11 +485,10 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms, single_body_parameters *
         type_i = atom_i->type;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
 
         /* diagonal entry in the matrix */
         H->j[cm_top] = i;
-        H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap, control,
+        H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap, control,
                 i, i, 0.0, 0.0, DIAGONAL );
         ++cm_top;
 
@@ -499,15 +497,12 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms, single_body_parameters *
             if ( far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut )
             {
                 j = far_nbr_list.far_nbr_list.nbr[pj];
-                atom_j = &my_atoms[j];
-                type_j = atom_j->type;
-
-                twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
-                r_ij = far_nbr_list.far_nbr_list.d[pj];
 
                 H->j[cm_top] = j;
-                H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap,
-                        control, i, j, r_ij, twbp->gamma, OFF_DIAGONAL );
+                H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap,
+                        control, i, j, far_nbr_list.far_nbr_list.d[pj],
+                        tbp[ index_tbp(type_i, my_atoms[j].type, num_atom_types) ].gamma,
+                        OFF_DIAGONAL );
                 ++cm_top;
             }
         }
@@ -529,19 +524,17 @@ HIP_GLOBAL void k_init_cm_full_fs( reax_atom *my_atoms, single_body_parameters *
 /* Compute the charge matrix entries and store the matrix in full format
  * using the far neighbors list (stored in full format) and according to
  * the full shell communication method */
-HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom *my_atoms, single_body_parameters *sbp,
-        two_body_parameters *tbp, storage workspace, control_params *control, 
+HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
+        storage workspace, control_params const * const control,
         reax_list far_nbr_list, int num_atom_types,
-        int *max_cm_entries, int *realloc_cm_entries )
+        int * const max_cm_entries, int * const realloc_cm_entries )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpScan<int>::TempStorage, temp)
-    int i, j, pj, thread_id, lane_id, itr;
-    int start_i, end_i, type_i, type_j;
+    extern __shared__ hipcub::WarpScan<int>::TempStorage temp1[];
+    int i, j, pj, thread_id, warp_id, lane_id, itr;
+    int start_i, end_i, type_i;
     int cm_top, num_cm_entries, offset, flag;
-    real r_ij;
-    single_body_parameters *sbp_i;
-    two_body_parameters *twbp;
-    reax_atom *atom_i, *atom_j;
+    reax_atom *atom_i;
     sparse_matrix *H;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -554,6 +547,7 @@ HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom *my_atoms, single_body_paramete
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
     H = &workspace.H;
     cm_top = H->start[i];
@@ -564,13 +558,12 @@ HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom *my_atoms, single_body_paramete
         type_i = atom_i->type;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
 
         /* diagonal entry in the matrix */
         if ( lane_id == 0 )
         {
             H->j[cm_top] = i;
-            H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap, control,
+            H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap, control,
                     i, i, 0.0, 0.0, DIAGONAL );
         }
         ++cm_top;
@@ -579,26 +572,21 @@ HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom *my_atoms, single_body_paramete
         {
             offset = (pj < end_i && far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut) ? 1 : 0;
             flag = (offset == 1) ? TRUE : FALSE;
-            hipcub::WarpScan<int>(temp[i % (blockDim.x / warpSize)]).ExclusiveSum(offset, offset);
+            hipcub::WarpScan<int>(temp1[warp_id]).ExclusiveSum(offset, offset);
 
             if ( flag == TRUE )
             {
                 j = far_nbr_list.far_nbr_list.nbr[pj];
-                atom_j = &my_atoms[j];
-                type_j = atom_j->type;
-
-                twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
-                r_ij = far_nbr_list.far_nbr_list.d[pj];
 
                 H->j[cm_top + offset] = j;
-                H->val[cm_top + offset] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap,
-                        control, i, j, r_ij, twbp->gamma, OFF_DIAGONAL );
+                H->val[cm_top + offset] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap,
+                        control, i, j, far_nbr_list.far_nbr_list.d[pj],
+                        tbp[ index_tbp(type_i, my_atoms[j].type, num_atom_types) ].gamma, OFF_DIAGONAL );
             }
 
             /* get cm_top from thread in last lane */
             cm_top = cm_top + offset + (flag == TRUE ? 1 : 0);
             cm_top = __shfl(cm_top, warpSize - 1 );
-            __syncthreads();
 
             pj += warpSize;
         }
@@ -608,7 +596,6 @@ HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom *my_atoms, single_body_paramete
     {
         H->end[i] = cm_top;
         num_cm_entries = cm_top - H->start[i];
-
 
         /* reallocation check */
         if ( num_cm_entries > max_cm_entries[i] )
@@ -622,19 +609,17 @@ HIP_GLOBAL void k_init_cm_full_fs_opt( reax_atom *my_atoms, single_body_paramete
 /* Compute the tabulated charge matrix entries and store the matrix in full format
  * using the far neighbors list (stored in full format) and according to
  * the full shell communication method */
-HIP_GLOBAL void k_init_cm_full_fs_tab( reax_atom *my_atoms, single_body_parameters *sbp,
-        storage workspace, control_params *control, 
+HIP_GLOBAL void k_init_cm_full_fs_tab( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp,
+        storage workspace, control_params const * const control,
         reax_list far_nbr_list, LR_lookup_table *t_LR, int num_atom_types,
-        int *max_cm_entries, int *realloc_cm_entries )
+        int * const max_cm_entries, int * const realloc_cm_entries )
 {
     int i, j, pj;
     int start_i, end_i;
-    int type_i, type_j;
+    int type_i;
     int cm_top;
     int num_cm_entries;
-    real r_ij;
-    single_body_parameters *sbp_i;
-    reax_atom *atom_i, *atom_j;
     sparse_matrix *H;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -649,15 +634,13 @@ HIP_GLOBAL void k_init_cm_full_fs_tab( reax_atom *my_atoms, single_body_paramete
 
     if ( i < H->n )
     {
-        atom_i = &my_atoms[i];
-        type_i = atom_i->type;
+        type_i = my_atoms[i].type;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
 
         /* diagonal entry in the matrix */
         H->j[cm_top] = i;
-        H->val[cm_top] = Init_Charge_Matrix_Entry( sbp_i, workspace.Tap, control,
+        H->val[cm_top] = Init_Charge_Matrix_Entry( &sbp[type_i], workspace.Tap, control,
                 i, i, 0.0, 0.0, DIAGONAL );
         ++cm_top;
 
@@ -667,14 +650,10 @@ HIP_GLOBAL void k_init_cm_full_fs_tab( reax_atom *my_atoms, single_body_paramete
 
             if ( far_nbr_list.far_nbr_list.d[pj] <= control->nonb_cut )
             {
-                atom_j = &my_atoms[j];
-                type_j = atom_j->type;
-
-                r_ij = far_nbr_list.far_nbr_list.d[pj];
-
                 H->j[cm_top] = j;
-                H->val[cm_top] = Init_Charge_Matrix_Entry_Tab( t_LR, r_ij,
-                        type_i, type_j, num_atom_types );
+                H->val[cm_top] = Init_Charge_Matrix_Entry_Tab( t_LR,
+                        far_nbr_list.far_nbr_list.d[pj],
+                        type_i, my_atoms[j].type, num_atom_types );
                 ++cm_top;
             }
         }
@@ -693,22 +672,20 @@ HIP_GLOBAL void k_init_cm_full_fs_tab( reax_atom *my_atoms, single_body_paramete
 }
 
 
-HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
-        two_body_parameters *tbp, storage workspace, control_params *control, 
+HIP_GLOBAL void k_init_bonds( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
+        storage workspace, control_params const * const control,
         reax_list far_nbr_list, reax_list bond_list, int n, int N,
-        int num_atom_types, int *max_bonds, int *realloc_bonds )
+        int num_atom_types, int * const max_bonds, int * const realloc_bonds )
 {
-    int i, j, pj;
-    int start_i, end_i;
-    int type_i, type_j;
-    int btop_i;
-    int num_bonds;
+    int i, j, pj, start_i, end_i;
+    int type_i, type_j, tbp_ij;
+    int btop_i, num_bonds;
+    real total_bond_order_i;
+    rvec dDeltap_self_i;
     real cutoff, r_ij;
     real C12, C34, C56;
     real BO_s, BO_pi, BO_pi2, BO;
-    single_body_parameters *sbp_i, *sbp_j;
-    two_body_parameters *twbp;
-    reax_atom *atom_i, *atom_j;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -717,12 +694,12 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
         return;
     }
 
-    atom_i = &my_atoms[i];
-    type_i = atom_i->type;
+    type_i = my_atoms[i].type;
     start_i = Start_Index( i, &far_nbr_list );
     end_i = End_Index( i, &far_nbr_list );
     btop_i = Start_Index( i, &bond_list );
-    sbp_i = &sbp[type_i];
+    total_bond_order_i = 0.0;
+    rvec_MakeZero( dDeltap_self_i );
 
     if ( i < n )
     {
@@ -743,16 +720,14 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
         if ( far_nbr_list.far_nbr_list.d[pj] <= cutoff )
         {
             j = far_nbr_list.far_nbr_list.nbr[pj];
-            atom_j = &my_atoms[j];
-            type_j = atom_j->type;
+            type_j = my_atoms[j].type;
             r_ij = far_nbr_list.far_nbr_list.d[pj];
-            sbp_j = &sbp[type_j];
-            twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
+            tbp_ij = index_tbp(type_i, type_j, num_atom_types);
 
             /* uncorrected bond orders */
-            if ( sbp_i->r_s > 0.0 && sbp_j->r_s > 0.0 )
+            if ( sbp[type_i].r_s > 0.0 && sbp[type_j].r_s > 0.0 )
             {
-                C12 = twbp->p_bo1 * POW( r_ij / twbp->r_s, twbp->p_bo2 );
+                C12 = tbp[tbp_ij].p_bo1 * POW( r_ij / tbp[tbp_ij].r_s, tbp[tbp_ij].p_bo2 );
                 BO_s = (1.0 + control->bo_cut) * EXP( C12 );
             }
             else
@@ -761,9 +736,9 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
                 BO_s = 0.0;
             }
 
-            if ( sbp_i->r_pi > 0.0 && sbp_j->r_pi > 0.0 )
+            if ( sbp[type_i].r_pi > 0.0 && sbp[type_j].r_pi > 0.0 )
             {
-                C34 = twbp->p_bo3 * POW( r_ij / twbp->r_p, twbp->p_bo4 );
+                C34 = tbp[tbp_ij].p_bo3 * POW( r_ij / tbp[tbp_ij].r_p, tbp[tbp_ij].p_bo4 );
                 BO_pi = EXP( C34 );
             }
             else
@@ -772,9 +747,9 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
                 BO_pi = 0.0;
             }
 
-            if ( sbp_i->r_pi_pi > 0.0 && sbp_j->r_pi_pi > 0.0 )
+            if ( sbp[type_i].r_pi_pi > 0.0 && sbp[type_j].r_pi_pi > 0.0 )
             {
-                C56 = twbp->p_bo5 * POW( r_ij / twbp->r_pp, twbp->p_bo6 );
+                C56 = tbp[tbp_ij].p_bo5 * POW( r_ij / tbp[tbp_ij].r_pp, tbp[tbp_ij].p_bo6 );
                 BO_pi2 = EXP( C56 );
             }
             else
@@ -795,7 +770,7 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
                         &far_nbr_list.far_nbr_list.rel_box[pj],
                         far_nbr_list.far_nbr_list.d[pj],
                         &far_nbr_list.far_nbr_list.dvec[pj], far_nbr_list.format,
-                        twbp, workspace.dDeltap_self, workspace.total_bond_order );
+                        &tbp[tbp_ij], dDeltap_self_i, &total_bond_order_i );
 
                 ++btop_i;
 
@@ -820,6 +795,9 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
      * (needed for atom ownership transfer via MPI) */
     my_atoms[i].num_bonds = num_bonds;
 
+    workspace.total_bond_order[i] = total_bond_order_i;
+    rvec_Copy( workspace.dDeltap_self[i], dDeltap_self_i );
+
     /* reallocation check */
     if ( num_bonds > max_bonds[i] )
     {
@@ -828,23 +806,23 @@ HIP_GLOBAL void k_init_bonds( reax_atom *my_atoms, single_body_parameters *sbp,
 }
 
 
-HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *sbp,
-        two_body_parameters *tbp, storage workspace, control_params *control, 
+HIP_GLOBAL void k_init_bonds_opt( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
+        storage workspace, control_params const * const control,
         reax_list far_nbr_list, reax_list bond_list, int n, int N,
-        int num_atom_types, int *max_bonds, int *realloc_bonds )
+        int num_atom_types, int * const max_bonds, int * const realloc_bonds )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpScan<int>::TempStorage, temp)
-    int i, j, pj, thread_id, lane_id, itr;
-    int start_i, end_i;
+    extern __shared__ hipcub::WarpScan<int>::TempStorage temp21[];
+    hipcub::WarpReduce<double>::TempStorage *temp22;
+    int i, j, pj, thread_id, warp_id, lane_id, itr;
+    int start_i, end_i, tbp_ij;
     int type_i, type_j;
-    int btop_i, offset, flag;
-    int num_bonds;
+    int btop_i, offset, flag, num_bonds;
     real cutoff, r_ij;
     real C12, C34, C56;
     real BO_s, BO_pi, BO_pi2, BO;
-    single_body_parameters *sbp_i, *sbp_j;
-    two_body_parameters *twbp;
-    reax_atom *atom_i, *atom_j;
+    real total_bond_order_i;
+    rvec dDeltap_self_i;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     /* all threads within a warp are assigned the bonds
@@ -856,13 +834,15 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
-    atom_i = &my_atoms[i];
-    type_i = atom_i->type;
+    temp22 = (hipcub::WarpReduce<double>::TempStorage *) &temp21[warp_id];
+    type_i = my_atoms[i].type;
     start_i = Start_Index( i, &far_nbr_list );
     end_i = End_Index( i, &far_nbr_list );
     btop_i = Start_Index( i, &bond_list );
-    sbp_i = &sbp[type_i];
+    total_bond_order_i = 0.0;
+    rvec_MakeZero( dDeltap_self_i );
 
     if ( i < n )
     {
@@ -882,16 +862,14 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
         if ( pj < end_i && far_nbr_list.far_nbr_list.d[pj] <= cutoff )
         {
             j = far_nbr_list.far_nbr_list.nbr[pj];
-            atom_j = &my_atoms[j];
-            type_j = atom_j->type;
+            type_j = my_atoms[j].type;
             r_ij = far_nbr_list.far_nbr_list.d[pj];
-            sbp_j = &sbp[type_j];
-            twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
+            tbp_ij = index_tbp(type_i, type_j, num_atom_types);
 
             /* uncorrected bond orders */
-            if ( sbp_i->r_s > 0.0 && sbp_j->r_s > 0.0 )
+            if ( sbp[type_i].r_s > 0.0 && sbp[type_j].r_s > 0.0 )
             {
-                C12 = twbp->p_bo1 * POW( r_ij / twbp->r_s, twbp->p_bo2 );
+                C12 = tbp[tbp_ij].p_bo1 * POW( r_ij / tbp[tbp_ij].r_s, tbp[tbp_ij].p_bo2 );
                 BO_s = (1.0 + control->bo_cut) * EXP( C12 );
             }
             else
@@ -900,9 +878,9 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
                 BO_s = 0.0;
             }
 
-            if ( sbp_i->r_pi > 0.0 && sbp_j->r_pi > 0.0 )
+            if ( sbp[type_i].r_pi > 0.0 && sbp[type_j].r_pi > 0.0 )
             {
-                C34 = twbp->p_bo3 * POW( r_ij / twbp->r_p, twbp->p_bo4 );
+                C34 = tbp[tbp_ij].p_bo3 * POW( r_ij / tbp[tbp_ij].r_p, tbp[tbp_ij].p_bo4 );
                 BO_pi = EXP( C34 );
             }
             else
@@ -911,9 +889,9 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
                 BO_pi = 0.0;
             }
 
-            if ( sbp_i->r_pi_pi > 0.0 && sbp_j->r_pi_pi > 0.0 )
+            if ( sbp[type_i].r_pi_pi > 0.0 && sbp[type_j].r_pi_pi > 0.0 )
             {
-                C56 = twbp->p_bo5 * POW( r_ij / twbp->r_pp, twbp->p_bo6 );
+                C56 = tbp[tbp_ij].p_bo5 * POW( r_ij / tbp[tbp_ij].r_pp, tbp[tbp_ij].p_bo6 );
                 BO_pi2 = EXP( C56 );
             }
             else
@@ -934,7 +912,7 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
 
         offset = (pj < end_i && far_nbr_list.far_nbr_list.d[pj] <= cutoff && BO >= control->bo_cut) ? 1 : 0;
         flag = (offset == 1) ? TRUE : FALSE;
-        hipcub::WarpScan<int>(temp[i % (blockDim.x / warpSize)]).ExclusiveSum(offset, offset);
+        hipcub::WarpScan<int>(temp21[warp_id]).ExclusiveSum(offset, offset);
 
         if ( flag == TRUE )
         {
@@ -945,7 +923,7 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
                     &far_nbr_list.far_nbr_list.rel_box[pj],
                     far_nbr_list.far_nbr_list.d[pj],
                     &far_nbr_list.far_nbr_list.dvec[pj], far_nbr_list.format,
-                    twbp, workspace.dDeltap_self, workspace.total_bond_order );
+                    &tbp[tbp_ij], dDeltap_self_i, &total_bond_order_i );
 
             /* TODO: future optimization if bond_mark implemented */
 //            if ( workspace->bond_mark[j] > workspace->bond_mark[i] + 1 )
@@ -961,10 +939,14 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
         /* get btop_i from thread in last lane */
         btop_i = btop_i + offset + (flag == TRUE ? 1 : 0);
         btop_i = __shfl(btop_i, warpSize - 1 );
-        __syncthreads();
 
         pj += warpSize;
     }
+
+    total_bond_order_i = hipcub::WarpReduce<double>(temp22[warp_id]).Sum(total_bond_order_i);
+    dDeltap_self_i[0] = hipcub::WarpReduce<double>(temp22[warp_id]).Sum(dDeltap_self_i[0]);
+    dDeltap_self_i[1] = hipcub::WarpReduce<double>(temp22[warp_id]).Sum(dDeltap_self_i[1]);
+    dDeltap_self_i[2] = hipcub::WarpReduce<double>(temp22[warp_id]).Sum(dDeltap_self_i[2]);
 
     if ( lane_id == 0 )
     {
@@ -976,6 +958,9 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
          * (needed for atom ownership transfer via MPI) */
         my_atoms[i].num_bonds = num_bonds;
 
+        workspace.total_bond_order[i] = total_bond_order_i;
+        rvec_Copy( workspace.dDeltap_self[i], dDeltap_self_i );
+
         /* reallocation check */
         if ( num_bonds > max_bonds[i] )
         {
@@ -986,9 +971,10 @@ HIP_GLOBAL void k_init_bonds_opt( reax_atom *my_atoms, single_body_parameters *s
 
 
 /* Construct the interaction list for hydrogen bonds */
-HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
-        control_params *control, reax_list far_nbr_list, reax_list hbond_list,
-        int n, int N, int num_atom_types, int *max_hbonds, int *realloc_hbonds )
+HIP_GLOBAL void k_init_hbonds( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, control_params const * const control,
+        reax_list far_nbr_list, reax_list hbond_list,
+        int n, int N, int num_atom_types, int * const max_hbonds, int * const realloc_hbonds )
 {
     int i, j, pj;
     int start_i, end_i;
@@ -996,8 +982,7 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
     int ihb, jhb, ihb_top;
     int num_hbonds;
     real cutoff;
-    single_body_parameters *sbp_i, *sbp_j;
-    reax_atom *atom_i, *atom_j;
+    reax_atom *atom_i;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -1010,8 +995,7 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
     type_i = atom_i->type;
     start_i = Start_Index( i, &far_nbr_list );
     end_i = End_Index( i, &far_nbr_list );
-    sbp_i = &sbp[type_i];
-    ihb = sbp_i->p_hbond;
+    ihb = sbp[type_i].p_hbond;
 
     cutoff = MIN( control->nonb_cut, control->hbond_cut );
 
@@ -1025,10 +1009,8 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
             if ( far_nbr_list.far_nbr_list.d[pj] <= cutoff )
             {
                 j = far_nbr_list.far_nbr_list.nbr[pj];
-                atom_j = &my_atoms[j];
-                type_j = atom_j->type;
-                sbp_j = &sbp[type_j];
-                jhb = sbp_j->p_hbond;
+                type_j = my_atoms[j].type;
+                jhb = sbp[type_j].p_hbond;
 
                 /* atom i: H bonding, ghost
                  * atom j: H atom, native */
@@ -1039,7 +1021,7 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
                     hbond_list.hbond_list[ihb_top].scl = -1;
                     hbond_list.hbond_list[ihb_top].ptr = pj;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     hbond_list.hbond_list[ihb_top].sym_index = -1;
                     rvec_MakeZero( hbond_list.hbond_list[ihb_top].hb_f );
 #endif
@@ -1055,7 +1037,7 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
                     hbond_list.hbond_list[ihb_top].scl = 1;
                     hbond_list.hbond_list[ihb_top].ptr = pj;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     hbond_list.hbond_list[ihb_top].sym_index = -1;
                     rvec_MakeZero( hbond_list.hbond_list[ihb_top].hb_f );
 #endif
@@ -1071,7 +1053,7 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
                     hbond_list.hbond_list[ihb_top].scl = -1;
                     hbond_list.hbond_list[ihb_top].ptr = pj;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     hbond_list.hbond_list[ihb_top].sym_index = -1;
                     rvec_MakeZero( hbond_list.hbond_list[ihb_top].hb_f );
 #endif
@@ -1099,19 +1081,19 @@ HIP_GLOBAL void k_init_hbonds( reax_atom *my_atoms, single_body_parameters *sbp,
 
 
 /* Construct the interaction list for hydrogen bonds */
-HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *sbp,
-        control_params *control, reax_list far_nbr_list, reax_list hbond_list,
-        int n, int N, int num_atom_types, int *max_hbonds, int *realloc_hbonds )
+HIP_GLOBAL void k_init_hbonds_opt( reax_atom * const my_atoms,
+        single_body_parameters const * const sbp, control_params const * const control,
+        reax_list far_nbr_list, reax_list hbond_list,
+        int n, int N, int num_atom_types, int * const max_hbonds, int * const realloc_hbonds )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpScan<int>::TempStorage, temp)
-    int i, j, pj, thread_id, lane_id, itr;
+    extern __shared__ hipcub::WarpScan<int>::TempStorage temp[];
+    int i, j, pj, thread_id, warp_id, lane_id, itr;
     int start_i, end_i;
     int type_i, type_j;
     int ihb, jhb, ihb_top, offset, flag;
     int num_hbonds;
     real cutoff;
-    single_body_parameters *sbp_i, *sbp_j;
-    reax_atom *atom_i, *atom_j;
+    reax_atom *atom_i;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     /* all threads within a warp are assigned the bonds
@@ -1123,13 +1105,13 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
     atom_i = &my_atoms[i];
     type_i = atom_i->type;
     start_i = Start_Index( i, &far_nbr_list );
     end_i = End_Index( i, &far_nbr_list );
-    sbp_i = &sbp[type_i];
-    ihb = sbp_i->p_hbond;
+    ihb = sbp[type_i].p_hbond;
 
     cutoff = MIN( control->nonb_cut, control->hbond_cut );
 
@@ -1139,18 +1121,24 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
     {
         for ( itr = 0, pj = start_i + lane_id; itr < (end_i - start_i + warpSize - 1) / warpSize; ++itr )
         {
-            j = far_nbr_list.far_nbr_list.nbr[pj];
-            atom_j = &my_atoms[j];
-            type_j = atom_j->type;
-            sbp_j = &sbp[type_j];
-            jhb = sbp_j->p_hbond;
+            if ( pj < end_i )
+            {
+                j = far_nbr_list.far_nbr_list.nbr[pj];
+                type_j = my_atoms[j].type;
+                jhb = sbp[type_j].p_hbond;
 
-            offset = (pj < end_i && far_nbr_list.far_nbr_list.d[pj] <= cutoff
-                    && ((i >= n && j < n && ihb == H_BONDING_ATOM && jhb == H_ATOM)
-                        || (i < n && ihb == H_ATOM && jhb == H_BONDING_ATOM)
-                        || (i < n && ihb == H_BONDING_ATOM && jhb == H_ATOM && j < n))) ? 1 : 0;
+                offset = (pj < end_i && far_nbr_list.far_nbr_list.d[pj] <= cutoff
+                        && ((i >= n && j < n && ihb == H_BONDING_ATOM && jhb == H_ATOM)
+                            || (i < n && ihb == H_ATOM && jhb == H_BONDING_ATOM)
+                            || (i < n && ihb == H_BONDING_ATOM && jhb == H_ATOM && j < n))) ? 1 : 0;
+            }
+            else
+            {
+                offset = 0;
+            }
+
             flag = (offset == 1) ? TRUE : FALSE;
-            hipcub::WarpScan<int>(temp[i % (blockDim.x / warpSize)]).ExclusiveSum(offset, offset);
+            hipcub::WarpScan<int>(temp[warp_id]).ExclusiveSum(offset, offset);
 
             if ( flag == TRUE )
             {
@@ -1163,7 +1151,7 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
                     hbond_list.hbond_list[ihb_top + offset].scl = -1;
                     hbond_list.hbond_list[ihb_top + offset].ptr = pj;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     hbond_list.hbond_list[ihb_top + offset].sym_index = -1;
                     rvec_MakeZero( hbond_list.hbond_list[ihb_top + offset].hb_f );
 #endif
@@ -1177,7 +1165,7 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
                     hbond_list.hbond_list[ihb_top + offset].scl = 1;
                     hbond_list.hbond_list[ihb_top + offset].ptr = pj;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     hbond_list.hbond_list[ihb_top + offset].sym_index = -1;
                     rvec_MakeZero( hbond_list.hbond_list[ihb_top + offset].hb_f );
 #endif
@@ -1191,7 +1179,7 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
                     hbond_list.hbond_list[ihb_top + offset].scl = -1;
                     hbond_list.hbond_list[ihb_top + offset].ptr = pj;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
                     hbond_list.hbond_list[ihb_top + offset].sym_index = -1;
                     rvec_MakeZero( hbond_list.hbond_list[ihb_top + offset].hb_f );
 #endif
@@ -1201,7 +1189,6 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
             /* get ihb_top from thread in last lane */
             ihb_top = ihb_top + offset + (flag == TRUE ? 1 : 0);
             ihb_top = __shfl(ihb_top, warpSize - 1 );
-            __syncthreads();
 
             pj += warpSize;
         }
@@ -1227,9 +1214,9 @@ HIP_GLOBAL void k_init_hbonds_opt( reax_atom *my_atoms, single_body_parameters *
 
 
 /* Construct the interaction list for bonds */
-HIP_GLOBAL void k_estimate_storages_cm_half( reax_atom *my_atoms,
-        control_params *control, reax_list far_nbr_list, int cm_n, int cm_n_max,
-        int *cm_entries, int *max_cm_entries )
+HIP_GLOBAL void k_estimate_storages_cm_half( reax_atom const * const my_atoms,
+        control_params const * const control, reax_list far_nbr_list,
+        int cm_n, int cm_n_max, int * const cm_entries, int * const max_cm_entries )
 {
     int i, j, pj; 
     int start_i, end_i;
@@ -1274,9 +1261,9 @@ HIP_GLOBAL void k_estimate_storages_cm_half( reax_atom *my_atoms,
 }
 
 
-HIP_GLOBAL void k_estimate_storages_cm_full( control_params *control,
+HIP_GLOBAL void k_estimate_storages_cm_full( control_params const * const control,
         reax_list far_nbr_list, int cm_n, int cm_n_max,
-        int *cm_entries, int *max_cm_entries )
+        int * const cm_entries, int * const max_cm_entries )
 {
     int i, pj; 
     int start_i, end_i;
@@ -1318,22 +1305,19 @@ HIP_GLOBAL void k_estimate_storages_cm_full( control_params *control,
 }
 
 
-HIP_GLOBAL void k_estimate_storage_bonds( reax_atom *my_atoms,
-        single_body_parameters *sbp, two_body_parameters *tbp,
+HIP_GLOBAL void k_estimate_storage_bonds( reax_atom const * const my_atoms,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
         control_params *control, reax_list far_nbr_list, 
         int num_atom_types, int n, int N, int total_cap,
-        int *bonds, int *max_bonds )
+        int * const bonds, int * const max_bonds )
 {
     int i, j, pj; 
     int start_i, end_i;
-    int type_i, type_j;
+    int type_i, type_j, tbp_ij;
     int num_bonds;
     real cutoff, r_ij; 
     real C12, C34, C56;
     real BO_s, BO_pi, BO_pi2;
-    single_body_parameters *sbp_i, *sbp_j;
-    two_body_parameters *twbp;
-    reax_atom *atom_i;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -1346,11 +1330,9 @@ HIP_GLOBAL void k_estimate_storage_bonds( reax_atom *my_atoms,
 
     if ( i < N )
     {
-        atom_i = &my_atoms[i];
-        type_i = atom_i->type;
+        type_i = my_atoms[i].type;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
 
         if ( i < n )
         {
@@ -1368,13 +1350,12 @@ HIP_GLOBAL void k_estimate_storage_bonds( reax_atom *my_atoms,
                 j = far_nbr_list.far_nbr_list.nbr[pj];
                 type_j = my_atoms[j].type;
                 r_ij = far_nbr_list.far_nbr_list.d[pj];
-                sbp_j = &sbp[type_j];
-                twbp = &tbp[ index_tbp(type_i ,type_j, num_atom_types) ];
+                tbp_ij = index_tbp(type_i ,type_j, num_atom_types);
 
                 /* uncorrected bond orders */
-                if ( sbp_i->r_s > 0.0 && sbp_j->r_s > 0.0 )
+                if ( sbp[type_i].r_s > 0.0 && sbp[type_j].r_s > 0.0 )
                 {
-                    C12 = twbp->p_bo1 * POW( r_ij / twbp->r_s, twbp->p_bo2 );
+                    C12 = tbp[tbp_ij].p_bo1 * POW( r_ij / tbp[tbp_ij].r_s, tbp[tbp_ij].p_bo2 );
                     BO_s = (1.0 + control->bo_cut) * EXP( C12 );
                 }
                 else
@@ -1383,9 +1364,9 @@ HIP_GLOBAL void k_estimate_storage_bonds( reax_atom *my_atoms,
                     BO_s = 0.0;
                 }
 
-                if ( sbp_i->r_pi > 0.0 && sbp_j->r_pi > 0.0 )
+                if ( sbp[type_i].r_pi > 0.0 && sbp[type_j].r_pi > 0.0 )
                 {
-                    C34 = twbp->p_bo3 * POW( r_ij / twbp->r_p, twbp->p_bo4 );
+                    C34 = tbp[tbp_ij].p_bo3 * POW( r_ij / tbp[tbp_ij].r_p, tbp[tbp_ij].p_bo4 );
                     BO_pi = EXP( C34 );
                 }
                 else
@@ -1394,9 +1375,9 @@ HIP_GLOBAL void k_estimate_storage_bonds( reax_atom *my_atoms,
                     BO_pi = 0.0;
                 }
 
-                if ( sbp_i->r_pi_pi > 0.0 && sbp_j->r_pi_pi > 0.0 )
+                if ( sbp[type_i].r_pi_pi > 0.0 && sbp[type_j].r_pi_pi > 0.0 )
                 {
-                    C56 = twbp->p_bo5 * POW( r_ij / twbp->r_pp, twbp->p_bo6 );
+                    C56 = tbp[tbp_ij].p_bo5 * POW( r_ij / tbp[tbp_ij].r_pp, tbp[tbp_ij].p_bo6 );
                     BO_pi2= EXP( C56 );
                 }
                 else
@@ -1421,10 +1402,10 @@ HIP_GLOBAL void k_estimate_storage_bonds( reax_atom *my_atoms,
 }
 
 
-HIP_GLOBAL void k_estimate_storage_hbonds( reax_atom *my_atoms,
-        single_body_parameters *sbp, control_params *control,
+HIP_GLOBAL void k_estimate_storage_hbonds( reax_atom const * const my_atoms,
+        single_body_parameters const * const sbp, control_params const * const control,
         reax_list far_nbr_list, int num_atom_types, int n, int N,
-        int total_cap, int *hbonds, int *max_hbonds )
+        int total_cap, int * const hbonds, int * const max_hbonds )
 {
     int i, j, pj; 
     int start_i, end_i;
@@ -1432,8 +1413,6 @@ HIP_GLOBAL void k_estimate_storage_hbonds( reax_atom *my_atoms,
     int ihb, jhb;
     int num_hbonds;
     real cutoff;
-    single_body_parameters *sbp_i, *sbp_j;
-    reax_atom *atom_i;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -1446,12 +1425,10 @@ HIP_GLOBAL void k_estimate_storage_hbonds( reax_atom *my_atoms,
 
     if ( i < N )
     {
-        atom_i = &my_atoms[i];
-        type_i = atom_i->type;
+        type_i = my_atoms[i].type;
         start_i = Start_Index( i, &far_nbr_list );
         end_i = End_Index( i, &far_nbr_list );
-        sbp_i = &sbp[type_i];
-        ihb = sbp_i->p_hbond;
+        ihb = sbp[type_i].p_hbond;
 
         if ( i < n )
         { 
@@ -1468,8 +1445,7 @@ HIP_GLOBAL void k_estimate_storage_hbonds( reax_atom *my_atoms,
             { 
                 j = far_nbr_list.far_nbr_list.nbr[pj];
                 type_j = my_atoms[j].type;
-                sbp_j = &sbp[type_j];
-                jhb = sbp_j->p_hbond;
+                jhb = sbp[type_j].p_hbond;
 
                 /* atom i: H bonding, ghost
                  * atom j: H atom, native */
@@ -1544,7 +1520,7 @@ HIP_GLOBAL void k_update_sym_dbond_indices( reax_list bond_list, int N )
 }
 
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
 HIP_GLOBAL void k_update_sym_hbond_indices_opt( reax_atom *my_atoms,
         reax_list hbond_list, int N )
 {
@@ -1630,7 +1606,7 @@ HIP_GLOBAL void k_print_hbonds( reax_atom *my_atoms, reax_list hbond_list, int n
         k = hbond_list.hbond_list[pj].nbr;
         hbond_jk = &hbond_list.hbond_list[pj];
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         printf( "p%03d, step %05d: %8d: %8d, %24.15f, %24.15f, %24.15f\n",
                 rank, step, my_atoms[i].Hindex, k,
                 hbond_jk->hb_f[0],
@@ -1646,26 +1622,29 @@ HIP_GLOBAL void k_print_hbonds( reax_atom *my_atoms, reax_list hbond_list, int n
 
 
 #if defined(DEBUG_FOCUS)
-static void Print_Forces( reax_system *system )
+static void Print_Forces( reax_system *system, control_params *control )
 {
     int blocks;
     
     blocks = (system->n) / DEF_BLOCK_SIZE
         + (((system->n % DEF_BLOCK_SIZE) == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_print_forces, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, workspace->d_workspace->f, system->n );
+    k_print_forces <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( system->d_my_atoms, workspace->d_workspace->f, system->n );
     hipCheckError( );
 }
 
 
-static void Print_HBonds( reax_system *system, int step )
+static void Print_HBonds( reax_system *system, control_params *control,
+        int step )
 {
     int blocks;
     
     blocks = (system->n) / DEF_BLOCK_SIZE
         + (((system->n % DEF_BLOCK_SIZE) == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_print_hbonds, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(lists[HBONDS]), system->n, system->my_rank, step );
+    k_print_hbonds <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( system->d_my_atoms, *(lists[HBONDS]), system->n, system->my_rank, step );
     hipCheckError( );
 }
 #endif
@@ -1674,7 +1653,8 @@ static void Print_HBonds( reax_system *system, int step )
 /* Initialize indices for far neighbors list post reallocation
  *
  * system: atomic system info. */
-void Hip_Init_Neighbor_Indices( reax_system *system, reax_list *far_nbr_list )
+void Hip_Init_Neighbor_Indices( reax_system *system, control_params *control,
+        reax_list *far_nbr_list )
 {
     int blocks;
 
@@ -1682,10 +1662,13 @@ void Hip_Init_Neighbor_Indices( reax_system *system, reax_list *far_nbr_list )
         + (far_nbr_list->n % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
     /* init indices */
-    Hip_Scan_Excl_Sum( system->d_max_far_nbrs, far_nbr_list->index, far_nbr_list->n );
+    Hip_Scan_Excl_Sum( system->d_max_far_nbrs, far_nbr_list->index,
+            far_nbr_list->n, 0, control->streams[0] );
 
     /* init end_indices */
-    hipLaunchKernelGGL(k_init_end_index, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_far_nbrs, far_nbr_list->index, far_nbr_list->end_index, far_nbr_list->n );
+    k_init_end_index <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( system->d_far_nbrs, far_nbr_list->index, far_nbr_list->end_index,
+          far_nbr_list->n );
     hipCheckError( );
 }
 
@@ -1694,22 +1677,22 @@ void Hip_Init_Neighbor_Indices( reax_system *system, reax_list *far_nbr_list )
  *
  * system: atomic system info. */
 void Hip_Init_HBond_Indices( reax_system *system, storage *workspace,
-        reax_list *hbond_list )
+        reax_list *hbond_list, hipStream_t s )
 {
     int blocks, *temp;
 
     blocks = system->total_cap / DEF_BLOCK_SIZE
         + (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(int) * system->total_cap,
-            "Hip_Init_HBond_Indices::workspace->scratch" );
-    temp = (int *) workspace->scratch;
+    sHipCheckMalloc( &workspace->scratch[2], &workspace->scratch_size[2],
+            sizeof(int) * system->total_cap, __FILE__, __LINE__ );
+    temp = (int *) workspace->scratch[2];
 
     /* init indices and end_indices */
-    Hip_Scan_Excl_Sum( system->d_max_hbonds, temp, system->total_cap );
+    Hip_Scan_Excl_Sum( system->d_max_hbonds, temp, system->total_cap, 2, s );
 
-    hipLaunchKernelGGL(k_init_hbond_indices, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, system->d_hbonds, temp, 
+    k_init_hbond_indices <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( system->d_my_atoms, system->reax_param.d_sbp, system->d_hbonds, temp, 
           hbond_list->index, hbond_list->end_index, system->total_cap );
     hipCheckError( );
 }
@@ -1718,7 +1701,8 @@ void Hip_Init_HBond_Indices( reax_system *system, storage *workspace,
 /* Initialize indices for far bonds list post reallocation
  *
  * system: atomic system info. */
-void Hip_Init_Bond_Indices( reax_system *system, reax_list * bond_list )
+void Hip_Init_Bond_Indices( reax_system *system, reax_list * bond_list,
+        hipStream_t s )
 {
     int blocks;
 
@@ -1726,10 +1710,12 @@ void Hip_Init_Bond_Indices( reax_system *system, reax_list * bond_list )
         (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
     /* init indices */
-    Hip_Scan_Excl_Sum( system->d_max_bonds, bond_list->index, system->total_cap );
+    Hip_Scan_Excl_Sum( system->d_max_bonds, bond_list->index,
+            system->total_cap, 1, s );
 
     /* init end_indices */
-    hipLaunchKernelGGL(k_init_end_index, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_bonds, bond_list->index, bond_list->end_index, system->total_cap );
+    k_init_end_index <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( system->d_bonds, bond_list->index, bond_list->end_index, system->total_cap );
     hipCheckError( );
 }
 
@@ -1738,7 +1724,8 @@ void Hip_Init_Bond_Indices( reax_system *system, reax_list * bond_list )
  *
  * system: atomic system info.
  * H: charge matrix */
-void Hip_Init_Sparse_Matrix_Indices( reax_system *system, sparse_matrix *H )
+void Hip_Init_Sparse_Matrix_Indices( reax_system *system, sparse_matrix *H,
+        hipStream_t s )
 {
     int blocks;
 
@@ -1746,11 +1733,12 @@ void Hip_Init_Sparse_Matrix_Indices( reax_system *system, sparse_matrix *H )
         + (H->n_max % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
     /* init indices */
-    Hip_Scan_Excl_Sum( system->d_max_cm_entries, H->start, H->n_max );
+    Hip_Scan_Excl_Sum( system->d_max_cm_entries, H->start, H->n_max, 4, s );
 
     //TODO: not needed for full format (Init_Forces sets H->end)
     /* init end_indices */
-    hipLaunchKernelGGL(k_init_end_index, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_cm_entries, H->start, H->end, H->n_max );
+    k_init_end_index <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( system->d_cm_entries, H->start, H->end, H->n_max );
     hipCheckError( );
 }
 
@@ -1763,29 +1751,33 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
 
     if ( realloc_cm == TRUE )
     {
-        blocks = system->total_cap / DEF_BLOCK_SIZE
-            + (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
+        blocks = workspace->d_workspace->H.n_max / DEF_BLOCK_SIZE
+            + (workspace->d_workspace->H.n_max % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
         if ( workspace->d_workspace->H.format == SYM_HALF_MATRIX )
         {
-            hipLaunchKernelGGL(k_estimate_storages_cm_half, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, (control_params *) control->d_control_params,
-                  *(lists[FAR_NBRS]), system->N,
-                  system->total_cap,
+            k_estimate_storages_cm_half <<< blocks, DEF_BLOCK_SIZE, 0,
+                                        control->streams[4] >>>
+                ( system->d_my_atoms, (control_params *) control->d_control_params,
+                  *(lists[FAR_NBRS]), workspace->d_workspace->H.n,
+                  workspace->d_workspace->H.n_max,
                   system->d_cm_entries, system->d_max_cm_entries );
         }
         else
         {
-            hipLaunchKernelGGL(k_estimate_storages_cm_full, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (control_params *) control->d_control_params,
-                  *(lists[FAR_NBRS]), system->N,
-                  system->total_cap,
+            k_estimate_storages_cm_full <<< blocks, DEF_BLOCK_SIZE, 0,
+                                        control->streams[4] >>>
+                ( (control_params *) control->d_control_params,
+                  *(lists[FAR_NBRS]), workspace->d_workspace->H.n,
+                  workspace->d_workspace->H.n_max,
                   system->d_cm_entries, system->d_max_cm_entries );
         }
         hipCheckError( );
 
-        Hip_Reduction_Sum( system->d_max_cm_entries,
-                system->d_total_cm_entries, system->total_cap );
-        sHipMemcpy( &system->total_cm_entries, system->d_total_cm_entries,
-                sizeof(int), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+        Hip_Reduction_Sum( system->d_max_cm_entries, system->d_total_cm_entries,
+                workspace->d_workspace->H.n_max, 4, control->streams[4] );
+        sHipMemcpyAsync( &system->total_cm_entries, system->d_total_cm_entries,
+                sizeof(int), hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
     }
 
     if ( realloc_bonds == TRUE )
@@ -1793,7 +1785,9 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
         blocks = system->total_cap / DEF_BLOCK_SIZE
             + (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_estimate_storage_bonds, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp, 
+        k_estimate_storage_bonds <<< blocks, DEF_BLOCK_SIZE, 0,
+                                 control->streams[1] >>>
+            ( system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp, 
               (control_params *) control->d_control_params,
               *(lists[FAR_NBRS]), system->reax_param.num_atom_types,
               system->n, system->N, system->total_cap,
@@ -1801,9 +1795,9 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
         hipCheckError( );
 
         Hip_Reduction_Sum( system->d_max_bonds, system->d_total_bonds,
-                system->total_cap );
-        sHipMemcpy( &system->total_bonds, system->d_total_bonds, sizeof(int),
-                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+                system->total_cap, 1, control->streams[1] );
+        sHipMemcpyAsync( &system->total_bonds, system->d_total_bonds, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[1], __FILE__, __LINE__ );
     }
 
     if ( system->numH > 0 && control->hbond_cut > 0.0 && realloc_hbonds == TRUE )
@@ -1811,7 +1805,9 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
         blocks = system->total_cap / DEF_BLOCK_SIZE
             + (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_estimate_storage_hbonds, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_estimate_storage_hbonds <<< blocks, DEF_BLOCK_SIZE, 0,
+                                  control->streams[2] >>>
+            ( system->d_my_atoms, system->reax_param.d_sbp,
               (control_params *) control->d_control_params,
               *(lists[FAR_NBRS]), system->reax_param.num_atom_types,
               system->n, system->N, system->total_cap,
@@ -1819,9 +1815,9 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
         hipCheckError( );
 
         Hip_Reduction_Sum( system->d_max_hbonds, system->d_total_hbonds,
-                system->total_cap );
-        sHipMemcpy( &system->total_hbonds, system->d_total_hbonds, sizeof(int),
-                hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+                system->total_cap, 2, control->streams[2] );
+        sHipMemcpyAsync( &system->total_hbonds, system->d_total_hbonds, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[2], __FILE__, __LINE__ );
     }
     else if ( step == 0 && (system->numH == 0 || control->hbond_cut <= 0.0) )
     {
@@ -1838,11 +1834,25 @@ void Hip_Estimate_Storages( reax_system *system, control_params *control,
 #endif
 
         control->hbond_cut = 0.0;
-        hipLaunchKernelGGL(k_disable_hydrogen_bonding, dim3(1), dim3(1 ), 0, 0,  (control_params *) control->d_control_params );
+        k_disable_hydrogen_bonding <<< 1, 1, 0, control->streams[2] >>>
+            ( (control_params *) control->d_control_params );
     }
+
+    hipStreamSynchronize( control->streams[4] );
+    hipStreamSynchronize( control->streams[1] );
+    hipStreamSynchronize( control->streams[2] );
 }
 
 
+/* Initialize the bond list, hydrogen bond list, and charge matrix
+ * data structures along with updating the pairwise distances in the
+ * far neighbor (Verlet) list if required.
+ *
+ * NOTE: the control flow of the code follows a
+ * try-compute-else-reallocate-and-retry logic which requires that
+ * the initialization kernels be atomic transactions. Locks are used
+ * to mark if the transaction succeeds (and thus should not be repeated).
+ */
 int Hip_Init_Forces( reax_system *system, control_params *control,
         simulation_data *data, storage *workspace,
         reax_list **lists, output_controls *out_control ) 
@@ -1851,44 +1861,63 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
     static int dist_done = FALSE, cm_done = FALSE, bonds_done = FALSE, hbonds_done = FALSE;
 #if defined(LOG_PERFORMANCE)
     float time_elapsed;
-    hipEvent_t time_event[4];
+    static hipEvent_t time_event[8];
+    static int time_events_alloc = FALSE;
     
-    for ( int i = 0; i < 4; ++i )
+    if ( time_events_alloc == FALSE )
     {
-        hipEventCreate( &time_event[i] );
+        for ( int i = 0; i < 8; ++i )
+        {
+            hipEventCreate( &time_event[i] );
+        }
+
+        time_events_alloc = TRUE;
     }
 #endif
 
     renbr = (data->step - data->prev_steps) % control->reneighbor == 0 ? TRUE : FALSE;
 
     /* reset reallocation flags on device */
-    hip_memset( system->d_realloc_cm_entries, FALSE, sizeof(int),
-            "Hip_Init_Forces::d_realloc_cm_entries" );
-    hip_memset( system->d_realloc_bonds, FALSE, sizeof(int),
-            "Hip_Init_Forces::d_realloc_bonds" );
-    hip_memset( system->d_realloc_hbonds, FALSE, sizeof(int),
-            "Hip_Init_Forces::d_realloc_hbonds" );
+    if ( cm_done == FALSE )
+    {
+        sHipMemsetAsync( system->d_realloc_cm_entries, FALSE, sizeof(int), 
+                control->streams[4], __FILE__, __LINE__ );
+    }
+    if ( bonds_done == FALSE )
+    {
+        sHipMemsetAsync( system->d_realloc_bonds, FALSE, sizeof(int), 
+                control->streams[1], __FILE__, __LINE__ );
+    }
+    if ( hbonds_done == FALSE )
+    {
+        sHipMemsetAsync( system->d_realloc_hbonds, FALSE, sizeof(int), 
+                control->streams[2], __FILE__, __LINE__ );
+    }
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[0] );
+    hipEventRecord( time_event[0], control->streams[0] );
 #endif
 
     if ( renbr == FALSE && dist_done == FALSE )
     {
-//        k_init_dist <<< control->blocks_n, control->block_size_n >>>
+//        k_init_dist <<< control->blocks_n, control->block_size_n, 0, control->streams[0] >>>
 //            ( system->d_my_atoms, *(lists[FAR_NBRS]), system->N );
 
         blocks = system->N * warpSize / DEF_BLOCK_SIZE
             + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_init_dist_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(lists[FAR_NBRS]), system->N );
+        k_init_dist_opt <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+            ( system->d_my_atoms, *(lists[FAR_NBRS]), system->N );
         hipCheckError( );
+
+        hipEventRecord( control->stream_events[0], control->streams[0] );
 
         dist_done = TRUE;
     }
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[1] );
+    hipEventRecord( time_event[1], control->streams[0] );
+    hipEventRecord( time_event[2], control->streams[4] );
 #endif
 
     if ( cm_done == FALSE )
@@ -1899,20 +1928,25 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
         /* update num. rows in matrix for this GPU */
         workspace->d_workspace->H.n = system->n;
 
-        Hip_Init_Sparse_Matrix_Indices( system, &workspace->d_workspace->H );
+        Hip_Init_Sparse_Matrix_Indices( system, &workspace->d_workspace->H,
+                control->streams[4] );
+
+        hipStreamWaitEvent( control->streams[4], control->stream_events[0], 0 );
 
         if ( workspace->d_workspace->H.format == SYM_HALF_MATRIX )
         {
             if ( control->tabulate <= 0 )
             {
-                hipLaunchKernelGGL(k_init_cm_half_fs, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp,
+                k_init_cm_half_fs <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[4] >>>
+                    ( system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp,
                       *(workspace->d_workspace), (control_params *) control->d_control_params,
                       *(lists[FAR_NBRS]), system->reax_param.num_atom_types,
                       system->d_max_cm_entries, system->d_realloc_cm_entries );
             }
             else
             {
-                hipLaunchKernelGGL(k_init_cm_half_fs_tab, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp,
+                k_init_cm_half_fs_tab <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[4] >>>
+                    ( system->d_my_atoms, system->reax_param.d_sbp,
                       *(workspace->d_workspace), (control_params *) control->d_control_params,
                       *(lists[FAR_NBRS]), workspace->d_LR, system->reax_param.num_atom_types,
                       system->d_max_cm_entries, system->d_realloc_cm_entries );
@@ -1922,7 +1956,7 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
         {
             if ( control->tabulate <= 0 )
             {
-//                k_init_cm_full_fs <<< blocks, DEF_BLOCK_SIZE >>>
+//                k_init_cm_full_fs <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[4] >>>
 //                    ( system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp,
 //                      *(workspace->d_workspace), (control_params *) control->d_control_params,
 //                      *(lists[FAR_NBRS]), system->reax_param.num_atom_types,
@@ -1931,25 +1965,32 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
                 blocks = workspace->d_workspace->H.n_max * warpSize / DEF_BLOCK_SIZE
                     + (workspace->d_workspace->H.n_max * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-                hipLaunchKernelGGL(k_init_cm_full_fs_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp,
+                k_init_cm_full_fs_opt <<< blocks, DEF_BLOCK_SIZE,
+                           sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                           control->streams[4] >>>
+                    ( system->d_my_atoms, system->reax_param.d_sbp, system->reax_param.d_tbp,
                       *(workspace->d_workspace), (control_params *) control->d_control_params,
                       *(lists[FAR_NBRS]), system->reax_param.num_atom_types,
                       system->d_max_cm_entries, system->d_realloc_cm_entries );
-		hipDeviceSynchronize();
             }
             else
             {
-                hipLaunchKernelGGL(k_init_cm_full_fs_tab, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp,
+                k_init_cm_full_fs_tab <<< blocks, DEF_BLOCK_SIZE, 0,
+                                      control->streams[4] >>>
+                    ( system->d_my_atoms, system->reax_param.d_sbp,
                       *(workspace->d_workspace), (control_params *) control->d_control_params,
                       *(lists[FAR_NBRS]), workspace->d_LR, system->reax_param.num_atom_types,
                       system->d_max_cm_entries, system->d_realloc_cm_entries );
             }
         }
         hipCheckError( );
+
+        hipEventRecord( control->stream_events[1], control->streams[4] );
     }
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[2] );
+    hipEventRecord( time_event[3], control->streams[4] );
+    hipEventRecord( time_event[4], control->streams[1] );
 #endif
 
     if ( bonds_done == FALSE )
@@ -1957,12 +1998,15 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
         blocks = system->total_cap / DEF_BLOCK_SIZE
             + ((system->total_cap % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 
-        hipLaunchKernelGGL(k_reset_bond_orders, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  *(workspace->d_workspace), system->total_cap );
+        k_reset_bond_orders <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[1] >>>
+            ( *(workspace->d_workspace), system->total_cap );
         hipCheckError( );
 
-        Hip_Init_Bond_Indices( system, lists[BONDS] );
+        Hip_Init_Bond_Indices( system, lists[BONDS], control->streams[1] );
 
-//        k_init_bonds <<< control->blocks_n, control->block_size_n >>>
+        hipStreamWaitEvent( control->streams[1], control->stream_events[0], 0 );
+
+//        k_init_bonds <<< control->blocks_n, control->block_size_n, 0, control->streams[1] >>>
 //            ( system->d_my_atoms, system->reax_param.d_sbp,
 //              system->reax_param.d_tbp, *(workspace->d_workspace),
 //              (control_params *) control->d_control_params,
@@ -1973,21 +2017,33 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
 
         blocks = system->N * warpSize / DEF_BLOCK_SIZE
             + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
-
-        hipLaunchKernelGGL(k_init_bonds_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_init_bonds_opt <<< blocks, DEF_BLOCK_SIZE,
+                           sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                           control->streams[1] >>>
+            ( system->d_my_atoms, system->reax_param.d_sbp,
               system->reax_param.d_tbp, *(workspace->d_workspace),
               (control_params *) control->d_control_params,
               *(lists[FAR_NBRS]), *(lists[BONDS]),
               system->n, system->N, system->reax_param.num_atom_types,
               system->d_max_bonds, system->d_realloc_bonds );
         hipCheckError( );
+
+        hipEventRecord( control->stream_events[1], control->streams[1] );
     }
+
+#if defined(LOG_PERFORMANCE)
+    hipEventRecord( time_event[5], control->streams[1] );
+    hipEventRecord( time_event[6], control->streams[2] );
+#endif
 
     if ( control->hbond_cut > 0.0 && system->numH > 0 && hbonds_done == FALSE )
     {
-        Hip_Init_HBond_Indices( system, workspace, lists[HBONDS] );
+        Hip_Init_HBond_Indices( system, workspace, lists[HBONDS],
+                control->streams[2] );
 
-//        k_init_hbonds <<< control->blocks_n, control->block_size_n >>>
+        hipStreamWaitEvent( control->streams[2], control->stream_events[0], 0 );
+
+//        k_init_hbonds <<< control->blocks_n, control->block_size_n, 0, control->streams[2] >>>
 //            ( system->d_my_atoms, system->reax_param.d_sbp,
 //              (control_params *) control->d_control_params,
 //              *(lists[FAR_NBRS]), *(lists[HBONDS]),
@@ -1998,25 +2054,55 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
         blocks = system->N * warpSize / DEF_BLOCK_SIZE
             + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_init_hbonds_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_init_hbonds_opt <<< blocks, DEF_BLOCK_SIZE,
+                           sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                           control->streams[2] >>>
+            ( system->d_my_atoms, system->reax_param.d_sbp,
               (control_params *) control->d_control_params,
               *(lists[FAR_NBRS]), *(lists[HBONDS]),
               system->n, system->N, system->reax_param.num_atom_types,
               system->d_max_hbonds, system->d_realloc_hbonds );
         hipCheckError( );
-    }
 
+        hipEventRecord( control->stream_events[3], control->streams[2] );
+    }
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[3] );
+    hipEventRecord( time_event[7], control->streams[2] );
 #endif
 
     /* check reallocation flags on device */
-    sHipMemcpy( &realloc_cm, system->d_realloc_cm_entries, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
-    sHipMemcpy( &realloc_bonds, system->d_realloc_bonds, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
-    sHipMemcpy( &realloc_hbonds, system->d_realloc_hbonds, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    if ( cm_done == FALSE )
+    {
+        sHipMemcpyAsync( &realloc_cm, system->d_realloc_cm_entries, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[4], __FILE__, __LINE__ );
+    }
+    else
+    {
+        realloc_cm = FALSE;
+    }
+    if ( bonds_done == FALSE )
+    {
+        sHipMemcpyAsync( &realloc_bonds, system->d_realloc_bonds, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[1], __FILE__, __LINE__ );
+    }
+    else
+    {
+        realloc_bonds = FALSE;
+    }
+    if ( hbonds_done == FALSE )
+    {
+        sHipMemcpyAsync( &realloc_hbonds, system->d_realloc_hbonds, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[2], __FILE__, __LINE__ );
+    }
+    else
+    {
+        realloc_hbonds = FALSE;
+    }
+
+    hipStreamSynchronize( control->streams[0] );
+    hipStreamSynchronize( control->streams[4] );
+    hipStreamSynchronize( control->streams[1] );
+    hipStreamSynchronize( control->streams[2] );
 
 #if defined(LOG_PERFORMANCE)
     if ( hipEventQuery( time_event[0] ) != hipSuccess ) 
@@ -2037,21 +2123,39 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
         hipEventSynchronize( time_event[2] );
     }
 
-    hipEventElapsedTime( &time_elapsed, time_event[1], time_event[2] ); 
-    data->timing.init_cm += (real) (time_elapsed / 1000.0);
-
     if ( hipEventQuery( time_event[3] ) != hipSuccess ) 
     {
         hipEventSynchronize( time_event[3] );
     }
 
     hipEventElapsedTime( &time_elapsed, time_event[2], time_event[3] ); 
-    data->timing.init_bond += (real) (time_elapsed / 1000.0);
-    
-    for ( int i = 0; i < 4; ++i )
+    data->timing.init_cm += (real) (time_elapsed / 1000.0);
+
+    if ( hipEventQuery( time_event[4] ) != hipSuccess ) 
     {
-        hipEventDestroy( time_event[i] );
+        hipEventSynchronize( time_event[4] );
     }
+
+    if ( hipEventQuery( time_event[5] ) != hipSuccess ) 
+    {
+        hipEventSynchronize( time_event[5] );
+    }
+
+    hipEventElapsedTime( &time_elapsed, time_event[4], time_event[5] ); 
+    data->timing.init_bond += (real) (time_elapsed / 1000.0);
+
+    if ( hipEventQuery( time_event[6] ) != hipSuccess ) 
+    {
+        hipEventSynchronize( time_event[6] );
+    }
+
+    if ( hipEventQuery( time_event[7] ) != hipSuccess ) 
+    {
+        hipEventSynchronize( time_event[7] );
+    }
+
+    hipEventElapsedTime( &time_elapsed, time_event[6], time_event[7] ); 
+    data->timing.init_bond += (real) (time_elapsed / 1000.0);
 #endif
 
     ret = (realloc_cm == FALSE && realloc_bonds == FALSE && realloc_hbonds == FALSE
@@ -2072,17 +2176,21 @@ int Hip_Init_Forces( reax_system *system, control_params *control,
 
     if ( ret == SUCCESS )
     {
-        hipLaunchKernelGGL(k_update_sym_dbond_indices, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  *(lists[BONDS]), system->N );
+        k_update_sym_dbond_indices <<< control->blocks_n, control->block_size_n,
+                                   0, control->streams[0] >>> 
+            ( *(lists[BONDS]), system->N );
         hipCheckError( );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         if ( control->hbond_cut > 0.0 && system->numH > 0 )
         {
             blocks = system->N * warpSize / DEF_BLOCK_SIZE
                 + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
             /* make hbond_list symmetric */
-            hipLaunchKernelGGL(k_update_sym_hbond_indices_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(lists[HBONDS]), system->N );
+            k_update_sym_hbond_indices_opt <<< blocks, DEF_BLOCK_SIZE,
+                                           0, control->streams[0] >>>
+                ( system->d_my_atoms, *(lists[HBONDS]), system->N );
             hipCheckError( );
         }
 #endif
@@ -2116,42 +2224,50 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
     static int dist_done = FALSE, bonds_done = FALSE, hbonds_done = FALSE;
 #if defined(LOG_PERFORMANCE)
     float time_elapsed;
-    hipEvent_t time_event[3];
+    static hipEvent_t time_event[3];
+    static int time_events_alloc = FALSE;
     
-    for ( int i = 0; i < 3; ++i )
+    if ( time_events_alloc == FALSE )
     {
-        hipEventCreate( &time_event[i] );
+        for ( int i = 0; i < 3; ++i )
+        {
+            hipEventCreate( &time_event[i] );
+        }
+
+        time_events_alloc = TRUE;
     }
 #endif
 
     renbr = (data->step - data->prev_steps) % control->reneighbor == 0 ? TRUE : FALSE;
 
     /* reset reallocation flags on device */
-    hip_memset( system->d_realloc_bonds, FALSE, sizeof(int),
-            "Hip_Init_Forces::d_realloc_bonds" );
-    hip_memset( system->d_realloc_hbonds, FALSE, sizeof(int),
-            "Hip_Init_Forces::d_realloc_hbonds" );
+    sHipMemsetAsync( system->d_realloc_bonds, FALSE, sizeof(int), 
+            control->streams[0], __FILE__, __LINE__ );
+    sHipMemsetAsync( system->d_realloc_hbonds, FALSE, sizeof(int), 
+            control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[0] );
+    hipEventRecord( time_event[0], control->streams[0] );
 #endif
 
     if ( renbr == FALSE && dist_done == FALSE )
     {
-//        k_init_dist <<< control->blocks_n, control->block_size_n >>>
+//        k_init_dist <<< control->blocks_n, control->block_size_n, 0, control->streams[0] >>>
 //            ( system->d_my_atoms, *(lists[FAR_NBRS]), system->N );
 
         blocks = system->N * warpSize / DEF_BLOCK_SIZE
             + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_init_dist_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(lists[FAR_NBRS]), system->N );
+        k_init_dist_opt <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+            ( system->d_my_atoms, *(lists[FAR_NBRS]), system->N );
         hipCheckError( );
 
         dist_done = TRUE;
     }
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[1] );
+    hipEventRecord( time_event[1], control->streams[0] );
 #endif
 
     if ( bonds_done == FALSE )
@@ -2159,12 +2275,13 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
         blocks = system->total_cap / DEF_BLOCK_SIZE
             + ((system->total_cap % DEF_BLOCK_SIZE == 0 ) ? 0 : 1);
 
-        hipLaunchKernelGGL(k_reset_bond_orders, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  *(workspace->d_workspace), system->total_cap );
+        k_reset_bond_orders <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+            ( *(workspace->d_workspace), system->total_cap );
         hipCheckError( );
 
-        Hip_Init_Bond_Indices( system, lists[BONDS] );
+        Hip_Init_Bond_Indices( system, lists[BONDS], control->streams[0] );
 
-//        k_init_bonds <<< control->blocks_n, control->block_size_n >>>
+//        k_init_bonds <<< control->blocks_n, control->block_size_n, 0, control->streams[0] >>>
 //            ( system->d_my_atoms, system->reax_param.d_sbp,
 //              system->reax_param.d_tbp, *(workspace->d_workspace),
 //              (control_params *) control->d_control_params,
@@ -2175,7 +2292,10 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
         blocks = control->block_size_n * warpSize / DEF_BLOCK_SIZE
             + (control->block_size_n * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_init_bonds_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_init_bonds_opt <<< blocks, DEF_BLOCK_SIZE,
+                     sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                     control->streams[0] >>>
+            ( system->d_my_atoms, system->reax_param.d_sbp,
               system->reax_param.d_tbp, *(workspace->d_workspace),
               (control_params *) control->d_control_params,
               *(lists[FAR_NBRS]), *(lists[BONDS]),
@@ -2186,9 +2306,10 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
 
     if ( control->hbond_cut > 0.0 && system->numH > 0 && hbonds_done == FALSE )
     {
-        Hip_Init_HBond_Indices( system, workspace, lists[HBONDS] );
+        Hip_Init_HBond_Indices( system, workspace, lists[HBONDS],
+                control->streams[0] );
 
-//        k_init_hbonds <<< control->blocks_n, control->block_size_n >>>
+//        k_init_hbonds <<< control->blocks_n, control->block_size_n, 0, control->streams[0] >>>
 //            ( system->d_my_atoms, system->reax_param.d_sbp,
 //              (control_params *) control->d_control_params,
 //              *(lists[FAR_NBRS]), *(lists[HBONDS]),
@@ -2199,7 +2320,10 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
         blocks = system->N * warpSize / DEF_BLOCK_SIZE
             + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-        hipLaunchKernelGGL(k_init_hbonds_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  system->d_my_atoms, system->reax_param.d_sbp,
+        k_init_hbonds_opt <<< blocks, DEF_BLOCK_SIZE,
+                          sizeof(hipcub::WarpScan<int>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                          control->streams[0] >>>
+            ( system->d_my_atoms, system->reax_param.d_sbp,
               (control_params *) control->d_control_params,
               *(lists[FAR_NBRS]), *(lists[HBONDS]),
               system->n, system->N, system->reax_param.num_atom_types,
@@ -2208,14 +2332,30 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
     }
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[2] );
+    hipEventRecord( time_event[2], control->streams[0] );
 #endif
 
     /* check reallocation flags on device */
-    sHipMemcpy( &realloc_bonds, system->d_realloc_bonds, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
-    sHipMemcpy( &realloc_hbonds, system->d_realloc_hbonds, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    if ( bonds_done == FALSE )
+    {
+        sHipMemcpyAsync( &realloc_bonds, system->d_realloc_bonds, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    }
+    else
+    {
+        realloc_bonds = FALSE;
+    }
+    if ( hbonds_done == FALSE )
+    {
+        sHipMemcpyAsync( &realloc_hbonds, system->d_realloc_hbonds, sizeof(int), 
+                hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    }
+    else
+    {
+        realloc_hbonds = FALSE;
+    }
+
+    hipStreamSynchronize( control->streams[0] );
 
 #if defined(LOG_PERFORMANCE)
     if ( hipEventQuery( time_event[0] ) != hipSuccess ) 
@@ -2238,11 +2378,6 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
 
     hipEventElapsedTime( &time_elapsed, time_event[1], time_event[2] ); 
     data->timing.init_bond += (real) (time_elapsed / 1000.0);
-    
-    for ( int i = 0; i < 3; ++i )
-    {
-        hipEventDestroy( time_event[i] );
-    }
 #endif
 
     ret = (realloc_bonds == FALSE && realloc_hbonds == FALSE
@@ -2259,17 +2394,21 @@ int Hip_Init_Forces_No_Charges( reax_system *system, control_params *control,
 
     if ( ret == SUCCESS )
     {
-        hipLaunchKernelGGL(k_update_sym_dbond_indices, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  *(lists[BONDS]), system->N );
+        k_update_sym_dbond_indices <<< control->blocks_n, control->block_size_n,
+                                   0, control->streams[0] >>> 
+           ( *(lists[BONDS]), system->N );
         hipCheckError( );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         if ( control->hbond_cut > 0.0 && system->numH > 0 )
         {
             blocks = system->N * warpSize / DEF_BLOCK_SIZE
                 + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
             /* make hbond_list symmetric */
-            hipLaunchKernelGGL(k_update_sym_hbond_indices_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(lists[HBONDS]), system->N );
+            k_update_sym_hbond_indices_opt <<< blocks, DEF_BLOCK_SIZE,
+                                           0, control->streams[0] >>>
+                ( system->d_my_atoms, *(lists[HBONDS]), system->N );
             hipCheckError( );
         }
 #endif
@@ -2343,9 +2482,9 @@ static void Hip_Compute_Total_Force( reax_system *system, control_params *contro
 {
     rvec *f;
 
-    check_smalloc( &workspace->host_scratch, &workspace->host_scratch_size,
+    smalloc_check( &workspace->host_scratch, &workspace->host_scratch_size,
             sizeof(rvec) * system->N, TRUE, SAFE_ZONE,
-            "Hip_Compute_Total_Force::workspace->host_scratch" );
+            __FILE__, __LINE__ );
     f = (rvec *) workspace->host_scratch;
     memset( f, 0, sizeof(rvec) * system->N );
 
@@ -2355,186 +2494,184 @@ static void Hip_Compute_Total_Force( reax_system *system, control_params *contro
      * based on the neighbors information each processor has had.
      * final values of force on each atom needs to be computed by adding up
      * all partially-final pieces */
-    sHipMemcpy( f, workspace->d_workspace->f, sizeof(rvec) * system->N ,
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( f, workspace->d_workspace->f, sizeof(rvec) * system->N,
+            hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
-//    Coll( system, mpi_data, f, RVEC_PTR_TYPE, mpi_data->mpi_rvec );
+    Coll_FS( system, mpi_data, f, RVEC_PTR_TYPE, mpi_data->mpi_rvec );
 
-    sHipMemcpy( workspace->d_workspace->f, f, sizeof(rvec) * system->N,
-            hipMemcpyHostToDevice, __FILE__, __LINE__ );
+    sHipMemcpyAsync( workspace->d_workspace->f, f, sizeof(rvec) * system->N,
+            hipMemcpyHostToDevice, control->streams[0], __FILE__, __LINE__ );
 
-    Hip_Total_Forces_Part2( system, workspace );
+    Hip_Total_Forces_Part2( system, control, workspace );
 }
 
 
-//
-//extern "C" int Hip_Compute_Forces( reax_system *system, control_params *control,
-//        simulation_data *data, storage *workspace, reax_list **lists,
-//        output_controls *out_control, mpi_datatypes *mpi_data )
-//{
-//    int charge_flag, ret;
-//    static int init_forces_done = FALSE;
-//#if defined(LOG_PERFORMANCE)
-//    float time_elapsed;
-//    hipEvent_t time_event[6];
-//
-//    for ( int i = 0; i < 6; ++i )
-//    {
-//        hipEventCreate( &time_event[i] );
-//    }
-//#endif
-//
-//    ret = SUCCESS;
-//
-//    if ( control->charge_freq > 0
-//            && (data->step - data->prev_steps) % control->charge_freq == 0 )
-//    {
-//        charge_flag = TRUE;
-//    }
-//    else
-//    {
-//        charge_flag = FALSE;
-//    }
-//
-//#if defined(LOG_PERFORMANCE)
-//    hipEventRecord( time_event[0] );
-//#endif
-//
-//    if ( init_forces_done == FALSE )
-//    {
-//        if ( charge_flag == TRUE )
-//        {
-//            ret = Hip_Init_Forces( system, control, data,
-//                    workspace, lists, out_control );
-//        }
-//        else
-//        {
-//            ret = Hip_Init_Forces_No_Charges( system, control, data,
-//                    workspace, lists, out_control );
-//        }
-//
-//        if ( ret == SUCCESS )
-//        {
-//            init_forces_done = TRUE;
-//        }
-//    }
-//
-//#if defined(LOG_PERFORMANCE)
-//    hipEventRecord( time_event[1] );
-//#endif
-//
-//    if ( ret == SUCCESS )
-//    {
-//        ret = Hip_Compute_Bonded_Forces( system, control, data,
-//                workspace, lists, out_control );
-//    }
-//
-//#if defined(LOG_PERFORMANCE)
-//    hipEventRecord( time_event[2] );
-//#endif
-//
-//    if ( ret == SUCCESS )
-//    {
-//        if ( charge_flag == TRUE )
-//        {
-//            Hip_Compute_Charges( system, control, data,
-//                    workspace, out_control, mpi_data );
-//        }
-//
-//#if defined(LOG_PERFORMANCE)
-//        hipEventRecord( time_event[3] );
-//#endif
-//
-//        Hip_Compute_NonBonded_Forces( system, control, data, workspace,
-//                lists, out_control );
-//
-//#if defined(LOG_PERFORMANCE)
-//        hipEventRecord( time_event[4] );
-//#endif
-//
-//        Hip_Compute_Total_Force( system, control, data, workspace, lists, mpi_data );
-//
-//#if defined(LOG_PERFORMANCE)
-//        hipEventRecord( time_event[5] );
-//#endif
-//
-//        init_forces_done = FALSE;
-//    }
-//
-//#if defined(LOG_PERFORMANCE)
-//    if ( hipEventQuery( time_event[0] ) != hipSuccess )
-//    {
-//        hipEventSynchronize( time_event[0] );
-//    }
-//
-//    return SUCCESS;
-//
-//    hipEventElapsedTime( &time_elapsed, time_event[0], time_event[1] );
-//    data->timing.init_forces += (real) (time_elapsed / 1000.0);
-//
-//    if ( hipEventQuery( time_event[2] ) != hipSuccess )
-//    {
-//        hipEventSynchronize( time_event[2] );
-//    }
-//
-//    hipEventElapsedTime( &time_elapsed, time_event[1], time_event[2] );
-//    data->timing.bonded += (real) (time_elapsed / 1000.0);
-//
-//    if ( ret == SUCCESS )
-//    {
-//        if ( hipEventQuery( time_event[3] ) != hipSuccess )
-//        {
-//            hipEventSynchronize( time_event[3] );
-//        }
-//
-//        hipEventElapsedTime( &time_elapsed, time_event[2], time_event[3] );
-//        data->timing.cm += (real) (time_elapsed / 1000.0);
-//
-//        if ( hipEventQuery( time_event[4] ) != hipSuccess )
-//        {
-//            hipEventSynchronize( time_event[4] );
-//        }
-//
-//        hipEventElapsedTime( &time_elapsed, time_event[3], time_event[4] );
-//        data->timing.nonb += (real) (time_elapsed / 1000.0);
-//
-//        if ( hipEventQuery( time_event[5] ) != hipSuccess )
-//        {
-//            hipEventSynchronize( time_event[5] );
-//        }
-//
-//        hipEventElapsedTime( &time_elapsed, time_event[4], time_event[5] );
-//        data->timing.bonded += (real) (time_elapsed / 1000.0);
-//    }
-//
-//    for ( int i = 0; i < 6; ++i )
-//    {
-//        hipEventDestroy( time_event[i] );
-//    }
-//#endif
-//
-//    return ret;
-//}
+extern "C" int Hip_Compute_Forces( reax_system *system, control_params *control,
+        simulation_data *data, storage *workspace, reax_list **lists,
+        output_controls *out_control, mpi_datatypes *mpi_data )
+{
+    int i, charge_flag, ret;
+    static int init_forces_done = FALSE;
+#if defined(LOG_PERFORMANCE)
+    float time_elapsed;
+    static hipEvent_t time_event[8];
+    static int time_events_alloc = FALSE;
+    
+    if ( time_events_alloc == FALSE )
+    {
+        for ( int i = 0; i < 8; ++i )
+        {
+            hipEventCreate( &time_event[i] );
+        }
 
-int Hip_Compute_Forces( reax_system *system, control_params *control,
-                         simulation_data *data, storage *workspace, reax_list **lists,
-                         output_controls *out_control, mpi_datatypes *mpi_data )
-                         {
+        time_events_alloc = TRUE;
+    }
+#endif
 
+    ret = SUCCESS;
 
-    //printf("Calling \n");
-    Hip_Init_Forces_No_Charges(system, control, data, workspace,lists, out_control);
-    //printf("Init forces\n");
+    if ( control->charge_freq > 0
+            && (data->step - data->prev_steps) % control->charge_freq == 0 )
+    {
+        charge_flag = TRUE;
+    }
+    else
+    {
+        charge_flag = FALSE;
+    }
 
-    Hip_Compute_Bonded_Forces(system, control, data, workspace, lists, out_control);
+#if defined(LOG_PERFORMANCE)
+    hipEventRecord( time_event[0], control->streams[0] );
+#endif
 
+    if ( init_forces_done == FALSE )
+    {
+        if ( charge_flag == TRUE )
+        {
+            ret = Hip_Init_Forces( system, control, data,
+                    workspace, lists, out_control );
+        }
+        else
+        {
+            ret = Hip_Init_Forces_No_Charges( system, control, data,
+                    workspace, lists, out_control );
+        }
 
-    Hip_Compute_NonBonded_Forces(system, control, data, workspace, lists, out_control);
-    Hip_Compute_Total_Force( system, control, data, workspace, lists, mpi_data );
-    //printf("Completed forces\n");
+        if ( ret == SUCCESS )
+        {
+            init_forces_done = TRUE;
+        }
+    }
 
-    return SUCCESS;
+#if defined(LOG_PERFORMANCE)
+    hipEventRecord( time_event[1], control->streams[0] );
+#endif
 
-    //exit(0);
+    if ( ret == SUCCESS )
+    {
+        ret = Hip_Compute_Bonded_Forces( system, control, data,
+                workspace, lists, out_control );
+    }
 
- }
+#if defined(LOG_PERFORMANCE)
+    hipEventRecord( time_event[2], control->streams[0] );
+    hipEventRecord( time_event[3], control->streams[4] );
+#endif
+
+    if ( ret == SUCCESS )
+    {
+        if ( charge_flag == TRUE )
+        {
+            Hip_Compute_Charges( system, control, data,
+                    workspace, out_control, mpi_data );
+        }
+
+#if defined(LOG_PERFORMANCE)
+        hipEventRecord( time_event[4], control->streams[4] );
+#endif
+
+        Hip_Compute_NonBonded_Forces( system, control, data, workspace,
+                lists, out_control );
+
+#if defined(LOG_PERFORMANCE)
+        hipEventRecord( time_event[5], control->streams[4] );
+        hipEventRecord( time_event[6], control->streams[0] );
+#endif
+
+        for ( i = 0; i < MAX_HIP_STREAMS; ++i )
+        {
+            hipStreamSynchronize( control->streams[i] );
+        }
+
+        Hip_Compute_Total_Force( system, control, data, workspace, lists, mpi_data );
+
+#if defined(LOG_PERFORMANCE)
+        hipEventRecord( time_event[7], control->streams[0] );
+#endif
+
+        init_forces_done = FALSE;
+    }
+
+#if defined(LOG_PERFORMANCE)
+    if ( hipEventQuery( time_event[0] ) != hipSuccess )
+    {
+        hipEventSynchronize( time_event[0] );
+    }
+
+    if ( hipEventQuery( time_event[1] ) != hipSuccess )
+    {
+        hipEventSynchronize( time_event[1] );
+    }
+
+    hipEventElapsedTime( &time_elapsed, time_event[0], time_event[1] );
+    data->timing.init_forces += (real) (time_elapsed / 1000.0);
+
+    if ( hipEventQuery( time_event[2] ) != hipSuccess )
+    {
+        hipEventSynchronize( time_event[2] );
+    }
+
+    hipEventElapsedTime( &time_elapsed, time_event[1], time_event[2] );
+    data->timing.bonded += (real) (time_elapsed / 1000.0);
+
+    if ( ret == SUCCESS )
+    {
+        if ( hipEventQuery( time_event[3] ) != hipSuccess )
+        {
+            hipEventSynchronize( time_event[3] );
+        }
+
+        if ( hipEventQuery( time_event[4] ) != hipSuccess )
+        {
+            hipEventSynchronize( time_event[4] );
+        }
+
+        hipEventElapsedTime( &time_elapsed, time_event[3], time_event[4] );
+        data->timing.cm += (real) (time_elapsed / 1000.0);
+
+        if ( hipEventQuery( time_event[5] ) != hipSuccess )
+        {
+            hipEventSynchronize( time_event[5] );
+        }
+
+        hipEventElapsedTime( &time_elapsed, time_event[4], time_event[5] );
+        data->timing.nonb += (real) (time_elapsed / 1000.0);
+
+        if ( hipEventQuery( time_event[6] ) != hipSuccess )
+        {
+            hipEventSynchronize( time_event[6] );
+        }
+
+        if ( hipEventQuery( time_event[7] ) != hipSuccess )
+        {
+            hipEventSynchronize( time_event[7] );
+        }
+
+        hipEventElapsedTime( &time_elapsed, time_event[6], time_event[7] );
+        data->timing.bonded += (real) (time_elapsed / 1000.0);
+    }
+#endif
+
+    return ret;
+}

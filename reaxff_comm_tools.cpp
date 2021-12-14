@@ -18,19 +18,21 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
-#if defined(PURE_REAX)
+
+#if defined(LAMMPS_REAX)
+    #include "reaxff_comm_tools.h"
+
+    #include "reaxff_grid.h"
+    #include "reaxff_reset_tools.h"
+    #include "reaxff_tool_box.h"
+    #include "reaxff_vector.h"
+#else
     #include "comm_tools.h"
 
     #include "grid.h"
     #include "reset_tools.h"
     #include "tool_box.h"
     #include "vector.h"
-#elif defined(LAMMPS_REAX)
-    #include "reaxff_comm_tools.h"
-    #include "reaxff_grid.h"
-    #include "reaxff_reset_tools.h"
-    #include "reaxff_tool_box.h"
-    #include "reaxff_vector.h"
 #endif
 
 
@@ -166,9 +168,9 @@ void Estimate_NT_Atoms( reax_system * const system, mpi_datatypes * const mpi_da
 
         /* allocate the estimated space */
         out_bufs[d].index = scalloc( 2 * nbr->est_send, sizeof(int),
-                "Estimate_NT_Atoms::out_bufs[d].index", MPI_COMM_WORLD );
+                __FILE__, __LINE__ );
         out_bufs[d].out_atoms = scalloc( 2 * nbr->est_send, sizeof(real),
-                "Estimate_NT_Atoms::out_bufs[d].out_atoms", MPI_COMM_WORLD );
+                __FILE__, __LINE__ );
 
         /* sort the atoms to their outgoing buffers */
         // TODO: to call or not to call?
@@ -416,7 +418,7 @@ static void Unpack_Transfer_Message( reax_system * const system,
     {
         /* need space for my_atoms now, other reallocations will trigger in Reallocate */
         system->my_atoms = static_cast<reax_atom*>(srealloc( system->my_atoms,
-                sizeof(reax_atom) * (end + cnt), "Unpack_Transfer_Message" ));
+                sizeof(reax_atom) * (end + cnt), __FILE__, __LINE__ ));
     }
 
     /* adjust coordinates of recved atoms if nbr is a periodic one */
@@ -531,7 +533,7 @@ void Unpack_Exchange_Message( reax_system * const system, int end,
     {
         /* need space for my_atoms now, other reallocations will trigger in Reallocate */
         system->my_atoms = static_cast<reax_atom*>(srealloc( system->my_atoms,
-                sizeof(reax_atom) * (end + cnt), "Unpack_Exchange_Message" ));
+                sizeof(reax_atom) * (end + cnt), __FILE__, __LINE__ ));
     }
 
     if ( nbr->prdc[dim] )
@@ -661,14 +663,14 @@ int SendRecv( reax_system * const system, mpi_datatypes * const mpi_data,
 
         for ( i = 2 * d; i < 6; ++i )
         {
-            check_srealloc( &out_bufs[i].out_atoms,
+            srealloc_check( &out_bufs[i].out_atoms,
                     &out_bufs[i].out_atoms_size,
                     type_size * (out_bufs[i].cnt + cnt[i]),
-                    TRUE, SAFE_ZONE, "SendRecv::mpi_data->out_atoms" );
-            check_srealloc( (void **) &out_bufs[i].index,
+                    TRUE, SAFE_ZONE, __FILE__, __LINE__ );
+            srealloc_check( (void **) &out_bufs[i].index,
                     &out_bufs[i].index_size,
                     sizeof(int) * (out_bufs[i].cnt + cnt[i]),
-                    TRUE, SAFE_ZONE, "SendRecv::mpi_data->index" );
+                    TRUE, SAFE_ZONE, __FILE__, __LINE__ );
         }
 
         sort_func( system, start, end, d, out_bufs, mpi_data );
@@ -696,8 +698,8 @@ int SendRecv( reax_system * const system, mpi_datatypes * const mpi_data,
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
-        check_smalloc( &mpi_data->in1_buffer, &mpi_data->in1_buffer_size,
-                type_size * cnt1, TRUE, SAFE_ZONE, "SendRecv::mpi_data->in1_buffer" );
+        smalloc_check( &mpi_data->in1_buffer, &mpi_data->in1_buffer_size,
+                type_size * cnt1, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->in1_buffer, cnt1, type,
                 nbr1->rank, 2 * d + 1, comm, MPI_STATUS_IGNORE );
@@ -718,8 +720,8 @@ int SendRecv( reax_system * const system, mpi_datatypes * const mpi_data,
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
-        check_smalloc( &mpi_data->in2_buffer, &mpi_data->in2_buffer_size,
-                type_size * cnt2, TRUE, SAFE_ZONE, "SendRecv::mpi_data->in2_buffer" );
+        smalloc_check( &mpi_data->in2_buffer, &mpi_data->in2_buffer_size,
+                type_size * cnt2, TRUE, SAFE_ZONE, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->in2_buffer, cnt2, type,
                 nbr2->rank, 2 * d, comm, MPI_STATUS_IGNORE );

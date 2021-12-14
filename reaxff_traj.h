@@ -22,11 +22,7 @@
 #ifndef __TRAJ_H__
 #define __TRAJ_H__
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
-    #include "reaxff_types.h"
-#endif
+#include "reax_types.h"
 
 #define MAX_TRJ_LINE_LEN     120
 #define MAX_TRJ_BUFFER_SIZE  (MAX_TRJ_LINE_LEN * 100)

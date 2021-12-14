@@ -22,10 +22,10 @@
 #ifndef __SYSTEM_PROP_H_
 #define __SYSTEM_PROP_H_
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "reax_types.h"
 #endif
 
 
@@ -37,7 +37,8 @@ void Temperature_Control( control_params*, simulation_data* );
 
 void Compute_Kinetic_Energy( reax_system*, simulation_data*, MPI_Comm );
 
-void Compute_Total_Energy( reax_system*, simulation_data*, MPI_Comm );
+void Compute_Total_Energy( reax_system const * const, control_params const * const,
+        simulation_data * const, MPI_Comm );
 
 void Check_Energy( simulation_data* );
 

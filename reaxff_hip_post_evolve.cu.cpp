@@ -1,10 +1,18 @@
 #include "hip/hip_runtime.h"
 
-#include "reaxff_hip_post_evolve.h"
+#if defined(LAMMPS_AREX)
+    #include "reaxff_hip_post_evolve.h"
 
-#include "reaxff_hip_utils.h"
+    #include "reaxff_hip_utils.h"
 
-#include "reaxff_vector.h"
+    #include "reaxff_vector.h"
+#else
+    #include "hip_post_evolve.h"
+
+    #include "hip_utils.h"
+
+    #include "../vector.h"
+#endif
 
 
 /* remove translation and rotational terms from center of mass velocities */
@@ -34,6 +42,8 @@ HIP_GLOBAL void k_remove_center_of_mass_velocities( reax_atom *my_atoms,
 extern "C" void Hip_Remove_CoM_Velocities( reax_system *system,
         control_params *control, simulation_data *data )
 {
-    hipLaunchKernelGGL(k_remove_center_of_mass_velocities, dim3(control->blocks), dim3(control->block_size ), 0, 0,  system->d_my_atoms, (simulation_data *)data->d_simulation_data, system->n );
+    k_remove_center_of_mass_velocities <<< control->blocks, control->block_size,
+                                       0, control->streams[0] >>>
+        ( system->d_my_atoms, (simulation_data *)data->d_simulation_data, system->n );
     hipCheckError( );
 }

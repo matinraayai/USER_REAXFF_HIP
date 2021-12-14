@@ -19,16 +19,23 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_VALENCE_ANGLES_H_
-#define __CUDA_VALENCE_ANGLES_H_
+#ifndef __HIP_VALENCE_ANGLES_H_
+#define __HIP_VALENCE_ANGLES_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
 
-#include "reaxff_vector.h"
+    #include "reaxff_vector.h"
+#else
+    #include "../reax_types.h"
+
+    #include "../vector.h"
+#endif
 
 
-int Hip_Compute_Valence_Angles( reax_system *, control_params *,
-        simulation_data *, storage *, reax_list **, output_controls * );
+int Hip_Compute_Valence_Angles( reax_system * const,
+        control_params const * const, simulation_data * const, storage * const ,
+        reax_list **, output_controls const * const );
 
 
 /* calculates the theta angle between atom triplet i-j-k */

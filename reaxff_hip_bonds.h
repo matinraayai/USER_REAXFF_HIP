@@ -19,18 +19,19 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_BONDS_H_
-#define __CUDA_BONDS_H_
+#ifndef __HIP_BONDS_H_
+#define __HIP_BONDS_H_
 
-#if defined(PURE_REAX)
-    #include "../reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
 
 
-void Hip_Compute_Bonds( reax_system *, control_params *,
-        simulation_data *, storage *, reax_list **, output_controls * );
+void Hip_Compute_Bonds( reax_system const * const, control_params const * const,
+        simulation_data * const, storage * const, reax_list **,
+        output_controls const * const );
 
 
 #endif

@@ -1,18 +1,33 @@
+
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_system_props.h"
+    
+    #include "reaxff_hip_copy.h"
+    #include "reaxff_hip_helpers.h"
+    #include "reaxff_hip_random.h"
+    #include "reaxff_hip_reduction.h"
+    #include "reaxff_hip_utils.h"
+    #include "reaxff_hip_vector.h"
+    
+    #include "reaxff_comm_tools.h"
+    #include "reaxff_tool_box.h"
+    #include "reaxff_vector.h"
+#else
+    #include "hip_system_props.h"
+    
+    #include "hip_copy.h"
+    #include "hip_helpers.h"
+    #include "hip_random.h"
+    #include "hip_reduction.h"
+    #include "hip_utils.h"
+    #include "hip_vector.h"
+    
+    #include "../comm_tools.h"
+    #include "../tool_box.h"
+    #include "../vector.h"
+#endif
+
 #include "hip/hip_runtime.h"
-
-#include "reaxff_hip_system_props.h"
-
-#include "reaxff_hip_copy.h"
-#include "reaxff_hip_helpers.h"
-#include "reaxff_hip_random.h"
-#include "reaxff_hip_reduction.h"
-#include "reaxff_hip_utils.h"
-#include "reaxff_hip_vector.h"
-
-#include "reaxff_comm_tools.h"
-#include "reaxff_tool_box.h"
-#include "reaxff_vector.h"
-
 #include <hipcub/hipcub.hpp>
 
 
@@ -21,7 +36,7 @@
 HIP_GLOBAL void k_center_of_mass_blocks_xcm( single_body_parameters *sbp,
         reax_atom *atoms, rvec *xcm_g, size_t n )
 {
-    HIP_DYNAMIC_SHARED( rvec, xcm_s)
+    extern __shared__ rvec xcm_s[];
     unsigned int i;
     int offset;
     rvec xcm;
@@ -78,7 +93,7 @@ HIP_GLOBAL void k_center_of_mass_blocks_xcm( single_body_parameters *sbp,
 HIP_GLOBAL void k_center_of_mass_blocks_vcm( single_body_parameters *sbp,
         reax_atom *atoms, rvec *vcm_g, size_t n )
 {
-    HIP_DYNAMIC_SHARED( rvec, vcm_s)
+    extern __shared__ rvec vcm_s[];
     unsigned int i;
     int offset;
     real m;
@@ -108,7 +123,6 @@ HIP_GLOBAL void k_center_of_mass_blocks_vcm( single_body_parameters *sbp,
     {
         rvec_Copy( vcm_s[ threadIdx.x / warpSize ], vcm );
     }
-
     __syncthreads( );
 
     /* block-level sum using shared memory */
@@ -133,7 +147,7 @@ HIP_GLOBAL void k_center_of_mass_blocks_vcm( single_body_parameters *sbp,
 HIP_GLOBAL void k_center_of_mass_blocks_amcm( single_body_parameters *sbp,
         reax_atom *atoms, rvec *amcm_g, size_t n )
 {
-    HIP_DYNAMIC_SHARED( rvec, amcm_s)
+    extern __shared__ rvec amcm_s[];
     unsigned int i;
     int offset;
     real m;
@@ -187,7 +201,7 @@ HIP_GLOBAL void k_center_of_mass_blocks_amcm( single_body_parameters *sbp,
 
 HIP_GLOBAL void k_compute_inertial_tensor_blocks( real *input, real *output, size_t n )
 {
-    HIP_DYNAMIC_SHARED( real, t_s)
+    extern __shared__ real t_s[];
     unsigned int i, index;
     int offset;
 
@@ -243,19 +257,19 @@ HIP_GLOBAL void k_compute_inertial_tensor_blocks( real *input, real *output, siz
 HIP_GLOBAL void k_compute_inertial_tensor_xx_xy( single_body_parameters *sbp,
         reax_atom *atoms, real *t_g, real xcm0, real xcm1, real xcm2, size_t n )
 {
-    HIP_DYNAMIC_SHARED( real, xx_xy_s)
+    extern __shared__ real xx_xy_s[];
     unsigned int i, index;
     int offset;
     real xx, xy, m;
     rvec diff, xcm;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
-    //mask = __ballot_sync( FULL_MASK, i < n );
     xcm[0] = xcm0;
     xcm[1] = xcm1;
     xcm[2] = xcm2;
 
-    if ( i < n) {
+    if ( i < n )
+    {
         m = sbp[ atoms[i].type ].mass;
         rvec_ScaledSum( diff, 1.0, atoms[i].x, -1.0, xcm );
         xx = diff[0] * diff[0] * m;
@@ -307,7 +321,7 @@ HIP_GLOBAL void k_compute_inertial_tensor_xx_xy( single_body_parameters *sbp,
 HIP_GLOBAL void k_compute_inertial_tensor_xz_yy( single_body_parameters *sbp,
         reax_atom *atoms, real *t_g, real xcm0, real xcm1, real xcm2, size_t n )
 {
-    HIP_DYNAMIC_SHARED( real, xz_yy_s)
+    extern __shared__ real xz_yy_s[];
     unsigned int i, index;
     int offset;
     real xz, yy, m;
@@ -318,7 +332,8 @@ HIP_GLOBAL void k_compute_inertial_tensor_xz_yy( single_body_parameters *sbp,
     xcm[1] = xcm1;
     xcm[2] = xcm2;
 
-    if ( i < n) {
+    if ( i < n )
+    {
         m = sbp[ atoms[i].type ].mass;
         rvec_ScaledSum( diff, 1.0, atoms[i].x, -1.0, xcm );
         xz = diff[0] * diff[2] * m;
@@ -344,7 +359,7 @@ HIP_GLOBAL void k_compute_inertial_tensor_xz_yy( single_body_parameters *sbp,
     __syncthreads( );
 
     /* block-level sum using shared memory */
-    for ( offset = blockDim.x / (warpSize * 2); offset > 0; offset >>= 1 )
+    for ( offset = blockDim.x / (warpSize << 1); offset > 0; offset >>= 1 )
     {
         if ( threadIdx.x < offset )
         {
@@ -368,7 +383,7 @@ HIP_GLOBAL void k_compute_inertial_tensor_xz_yy( single_body_parameters *sbp,
 HIP_GLOBAL void k_compute_inertial_tensor_yz_zz( single_body_parameters *sbp,
         reax_atom *atoms, real *t_g, real xcm0, real xcm1, real xcm2, size_t n )
 {
-    HIP_DYNAMIC_SHARED( real, yz_zz_s)
+    extern __shared__ real yz_zz_s[];
     unsigned int i, index;
     int offset;
     real yz, zz, m;
@@ -379,7 +394,8 @@ HIP_GLOBAL void k_compute_inertial_tensor_yz_zz( single_body_parameters *sbp,
     xcm[1] = xcm1;
     xcm[2] = xcm2;
 
-    if (i < n) {
+    if ( i < n )
+    {
         m = sbp[ atoms[i].type ].mass;
         rvec_ScaledSum( diff, 1.0, atoms[i].x, -1.0, xcm );
         yz = diff[1] * diff[2] * m;
@@ -440,7 +456,7 @@ HIP_GLOBAL void k_compute_total_mass( single_body_parameters *sbp, reax_atom *my
         return;
     }
 
-    M_g[blockIdx.x] = sbp[ my_atoms[i].type ].mass;
+    M_g[i] = sbp[ my_atoms[i].type ].mass;
 }
 
 
@@ -533,49 +549,72 @@ static void Hip_Compute_Momentum( reax_system *system, control_params *control,
 {
     rvec *spad;
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(rvec) * (control->blocks + 1),
-            "Hip_Compute_Momentum::workspace->scratch" );
-    spad = (rvec *) workspace->scratch;
+    sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+            sizeof(rvec) * (control->blocks + 1), __FILE__, __LINE__ );
+    spad = (rvec *) workspace->scratch[0];
 
     // xcm
-    hip_memset( spad, 0, sizeof(rvec) * (control->blocks + 1),
-            "Hip_Compute_Momentum::spad" );
+    sHipMemsetAsync( spad, 0, sizeof(rvec) * (control->blocks + 1),
+            control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
     
-    hipLaunchKernelGGL(k_center_of_mass_blocks_xcm, dim3(control->blocks), dim3(control->block_size), sizeof(rvec) * (control->block_size / warpSize) , 0,  system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
+    k_center_of_mass_blocks_xcm <<< control->blocks, control->block_size,
+                                sizeof(rvec) * (control->block_size / warpSize),
+                                control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
     hipCheckError( );
     
-    hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(control->blocks_pow_2), sizeof(rvec) * (control->blocks_pow_2 / warpSize) , 0,  spad, &spad[control->blocks], control->blocks );
+    k_reduction_rvec <<< 1, control->blocks_pow_2,
+                     sizeof(rvec) * (control->blocks_pow_2 / warpSize),
+                     control->streams[0] >>>
+            ( spad, &spad[control->blocks], control->blocks );
     hipCheckError( );
 
-    sHipMemcpy( xcm, &spad[control->blocks], sizeof(rvec),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( xcm, &spad[control->blocks], sizeof(rvec),
+            hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
     
     // vcm
-    hip_memset( spad, 0, sizeof(rvec) * (control->blocks + 1),
-            "Hip_Compute_Momentum::spad" );
+    sHipMemsetAsync( spad, 0, sizeof(rvec) * (control->blocks + 1),
+            control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
     
-    hipLaunchKernelGGL(k_center_of_mass_blocks_vcm, dim3(control->blocks), dim3(control->block_size), sizeof(rvec) * (control->block_size / warpSize) , 0,  system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
+    k_center_of_mass_blocks_vcm <<< control->blocks, control->block_size,
+                                sizeof(rvec) * (control->block_size / warpSize),
+                                control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
     hipCheckError( );
     
-    hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(control->blocks_pow_2), sizeof(rvec) * (control->blocks_pow_2 / warpSize) , 0,  spad, &spad[control->blocks], control->blocks );
+    k_reduction_rvec <<< 1, control->blocks_pow_2,
+                     sizeof(rvec) * (control->blocks_pow_2 / warpSize),
+                     control->streams[0] >>>
+        ( spad, &spad[control->blocks], control->blocks );
     hipCheckError( );
 
-    sHipMemcpy( vcm, &spad[control->blocks], sizeof(rvec),
-        hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( vcm, &spad[control->blocks], sizeof(rvec),
+        hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
     
     // amcm
-    hip_memset( spad, 0,  sizeof(rvec) * (control->blocks + 1),
-            "Hip_Compute_Momentum::spad");
+    sHipMemsetAsync( spad, 0,  sizeof(rvec) * (control->blocks + 1),
+            control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
     
-    hipLaunchKernelGGL(k_center_of_mass_blocks_amcm, dim3(control->blocks), dim3(control->block_size), sizeof(rvec) * (control->block_size / warpSize) , 0,  system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
+    k_center_of_mass_blocks_amcm <<< control->blocks, control->block_size,
+                                 sizeof(rvec) * (control->block_size / warpSize),
+                                 control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
     hipCheckError( );
     
-    hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(control->blocks_pow_2), sizeof(rvec) * (control->blocks_pow_2 / warpSize) , 0,  spad, &spad[control->blocks], control->blocks );
+    k_reduction_rvec <<< 1, control->blocks_pow_2,
+                     sizeof(rvec) * (control->blocks_pow_2 / warpSize),
+                     control->streams[0] >>>
+        ( spad, &spad[control->blocks], control->blocks );
     hipCheckError( );
 
-    sHipMemcpy( amcm, &spad[control->blocks], sizeof(rvec),
-        hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( amcm, &spad[control->blocks], sizeof(rvec),
+        hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 }
 
 
@@ -584,32 +623,45 @@ static void Hip_Compute_Inertial_Tensor( reax_system *system, control_params *co
 {
     real *spad;
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(real) * 6 * (control->blocks + 1),
-            "Hip_Compute_Inertial_Tensor::workspace->scratch" );
-    spad = (real *) workspace->scratch;
-    hip_memset( spad, 0, sizeof(real) * 6 * (control->blocks + 1),
-            "Hip_Compute_Intertial_Tensor::tmp" );
+    sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+            sizeof(real) * 6 * (control->blocks + 1), __FILE__, __LINE__ );
+    spad = (real *) workspace->scratch[0];
+    sHipMemsetAsync( spad, 0, sizeof(real) * 6 * (control->blocks + 1),
+            control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
-    hipLaunchKernelGGL(k_compute_inertial_tensor_xx_xy, dim3(control->blocks), dim3(control->block_size), sizeof(real) * 2 * (control->block_size / warpSize) , 0,  system->reax_param.d_sbp, system->d_my_atoms, spad,
+    k_compute_inertial_tensor_xx_xy <<< control->blocks, control->block_size,
+                                sizeof(real) * 2 * (control->block_size / warpSize),
+                                control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad,
           my_xcm[0], my_xcm[1], my_xcm[2], system->n );
     hipCheckError( );
 
-    hipLaunchKernelGGL(k_compute_inertial_tensor_xz_yy, dim3(control->blocks), dim3(control->block_size), sizeof(real) * 2 * (control->block_size / warpSize) , 0,  system->reax_param.d_sbp, system->d_my_atoms, spad,
+    k_compute_inertial_tensor_xz_yy <<< control->blocks, control->block_size,
+                                sizeof(real) * 2 * (control->block_size / warpSize),
+                                control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad,
           my_xcm[0], my_xcm[1], my_xcm[2], system->n );
     hipCheckError( );
 
-    hipLaunchKernelGGL(k_compute_inertial_tensor_yz_zz, dim3(control->blocks), dim3(control->block_size), sizeof(real) * 2 * (control->block_size / warpSize) , 0,  system->reax_param.d_sbp, system->d_my_atoms, spad,
+    k_compute_inertial_tensor_yz_zz <<< control->blocks, control->block_size,
+                                sizeof(real) * 2 * (control->block_size / warpSize),
+                                control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad,
           my_xcm[0], my_xcm[1], my_xcm[2], system->n );
     hipCheckError( );
 
     /* reduction of block-level partial sums for inertial tensor */
-    hipLaunchKernelGGL(k_compute_inertial_tensor_blocks, dim3(1), dim3(control->blocks_pow_2), sizeof(real) * 6 * control->blocks_pow_2 , 0,  spad, &spad[6 * control->blocks], control->blocks );
+    k_compute_inertial_tensor_blocks <<< 1, control->blocks_pow_2,
+                                     sizeof(real) * 6 * control->blocks_pow_2,
+                                     control->streams[0] >>>
+        ( spad, &spad[6 * control->blocks], control->blocks );
     hipCheckError( );
 
-    sHipMemcpy( t, &spad[6 * control->blocks],
+    sHipMemcpyAsync( t, &spad[6 * control->blocks],
         sizeof(real) * 6, hipMemcpyDeviceToHost,
-        __FILE__, __LINE__ );
+        control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 }
 
 
@@ -640,7 +692,8 @@ void Hip_Generate_Initial_Velocities( reax_system *system,
             MPI_Abort( MPI_COMM_WORLD,  INVALID_INPUT );
         }
 
-        hipLaunchKernelGGL(k_atom_velocities_zero, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->n );
+        k_atom_velocities_zero <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+            ( system->d_my_atoms, system->n );
     }
     else
     {
@@ -653,7 +706,8 @@ void Hip_Generate_Initial_Velocities( reax_system *system,
 
         Hip_Randomize( );
 
-        hipLaunchKernelGGL(k_atom_velocities_random, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->reax_param.d_sbp, system->d_my_atoms, T, system->n );
+        k_atom_velocities_random <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+            ( system->reax_param.d_sbp, system->d_my_atoms, T, system->n );
     }
 }
 
@@ -665,20 +719,22 @@ extern "C" void Hip_Compute_Kinetic_Energy( reax_system *system,
     int ret;
     real *kinetic_energy;
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(real) * (system->n + 1),
-            "Hip_Compute_Kinetic_Energy::workspace->scratch" );
-    kinetic_energy = (real *) workspace->scratch;
+    sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+            sizeof(real) * (system->n + 1), __FILE__, __LINE__ );
+    kinetic_energy = (real *) workspace->scratch[0];
 
-    hipLaunchKernelGGL(k_compute_kinetic_energy, dim3(control->blocks), dim3(control->block_size ), 0, 0,  system->reax_param.d_sbp, system->d_my_atoms, kinetic_energy, system->n );
+    k_compute_kinetic_energy <<< control->blocks, control->block_size, 0, control->streams[0] >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, kinetic_energy, system->n );
     hipCheckError( );
 
     /* note: above kernel sums the kinetic energy contribution within blocks,
      * and this call finishes the global reduction across all blocks */
-    Hip_Reduction_Sum( kinetic_energy, &kinetic_energy[system->n], system->n );
+    Hip_Reduction_Sum( kinetic_energy, &kinetic_energy[system->n], system->n,
+            0, control->streams[0] );
 
-    sHipMemcpy( &data->my_en.e_kin, &kinetic_energy[system->n],
-            sizeof(real), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &data->my_en.e_kin, &kinetic_energy[system->n],
+            sizeof(real), hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
     ret = MPI_Allreduce( &data->my_en.e_kin, &data->sys_en.e_kin,
             1, MPI_DOUBLE, MPI_SUM, comm );
@@ -700,18 +756,19 @@ void Hip_Compute_Total_Mass( reax_system *system, control_params *control,
     int ret;
     real my_M, *spad;
 
-    hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-            sizeof(real) * (system->n + 1),
-            "Hip_Compute_Total_Mass::workspace->scratch" );
-    spad = (real *) workspace->scratch;
+    sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+            sizeof(real) * (system->n + 1), __FILE__, __LINE__ );
+    spad = (real *) workspace->scratch[0];
 
-    hipLaunchKernelGGL(k_compute_total_mass, dim3(control->blocks), dim3(control->block_size  ), 0, 0,  system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
+    k_compute_total_mass <<< control->blocks, control->block_size, 0, control->streams[0]  >>>
+        ( system->reax_param.d_sbp, system->d_my_atoms, spad, system->n );
     hipCheckError( );
 
-    Hip_Reduction_Sum( spad, &spad[system->n], system->n );
+    Hip_Reduction_Sum( spad, &spad[system->n], system->n, 0, control->streams[0] );
 
-    sHipMemcpy( &my_M, &spad[system->n], sizeof(real),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &my_M, &spad[system->n], sizeof(real), 
+            hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
     ret = MPI_Allreduce( &my_M, &data->M, 1, MPI_DOUBLE, MPI_SUM, comm );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
@@ -845,23 +902,32 @@ void Hip_Compute_Pressure( reax_system* system, control_params *control,
     /* 0: both int and ext, 1: ext only, 2: int only */
     if ( control->press_mode == 0 || control->press_mode == 2 )
     {
-        hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
+        sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
                 sizeof(rvec) * (system->n + control->blocks + 1),
-                "Hip_Compute_Pressure::workspace->scratch" );
-        rvec_spad = (rvec *) workspace->scratch;
+                __FILE__, __LINE__ );
+        rvec_spad = (rvec *) workspace->scratch[0];
 
-        hipLaunchKernelGGL(k_compute_pressure, dim3(control->blocks), dim3(control->block_size ), 0, 0,  system->d_my_atoms, system->d_big_box, rvec_spad,
+        k_compute_pressure <<< control->blocks, control->block_size, 0,
+                           control->streams[0] >>>
+            ( system->d_my_atoms, system->d_big_box, rvec_spad,
               system->n );
 
-        hipLaunchKernelGGL(k_reduction_rvec, dim3(control->blocks), dim3(control->block_size), sizeof(rvec) * (control->block_size / warpSize) , 0,  rvec_spad, &rvec_spad[system->n],  system->n );
+        k_reduction_rvec <<< control->blocks, control->block_size,
+                         sizeof(rvec) * (control->block_size / warpSize),
+                         control->streams[0] >>>
+            ( rvec_spad, &rvec_spad[system->n],  system->n );
         hipCheckError( );
 
-        hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(control->blocks_pow_2), sizeof(rvec) * (control->blocks_pow_2 / warpSize) , 0,  &rvec_spad[system->n], &rvec_spad[system->n + control->blocks],
+        k_reduction_rvec <<< 1, control->blocks_pow_2,
+                         sizeof(rvec) * (control->blocks_pow_2 / warpSize),
+                         control->streams[0] >>>
+            ( &rvec_spad[system->n], &rvec_spad[system->n + control->blocks],
               control->blocks );
         hipCheckError( );
 
-        sHipMemcpy( &int_press, &rvec_spad[system->n + control->blocks],
-                sizeof(rvec), hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+        sHipMemcpyAsync( &int_press, &rvec_spad[system->n + control->blocks],
+                sizeof(rvec), hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+        hipStreamSynchronize( control->streams[0] );
     }
 
     /* sum up internal and external pressure */

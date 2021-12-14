@@ -2,15 +2,10 @@
   PuReMD - Purdue ReaxFF Molecular Dynamics Program
 
   Copyright (2010) Purdue University
-  Hasan Metin Aktulga, hmaktulga@lbl.gov
+  Hasan Metin Aktulga, haktulga@cs.purdue.edu
   Joseph Fogarty, jcfogart@mail.usf.edu
   Sagar Pandit, pandit@usf.edu
   Ananth Y Grama, ayg@cs.purdue.edu
-
-  Please cite the related publication:
-  H. M. Aktulga, J. C. Fogarty, S. A. Pandit, A. Y. Grama,
-  "Parallel Reactive Molecular Dynamics: Numerical Methods and
-  Algorithmic Techniques", Parallel Computing, in press.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -41,8 +36,8 @@
 
 
 void Read_Force_Field_File( const char * const ffield_file, reax_interaction * const reax,
-                            reax_system * const system, control_params * const control )
-                            {
+        reax_system * const system, control_params * const control )
+{
     FILE *fp;
     char *s;
     char **tmp;
@@ -53,13 +48,13 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
     int index1, index2;
 
     /* open force field file */
-    fp = sfopen( ffield_file, "r", "Read_Force_Field::fp" );
+    fp = sfopen( ffield_file, "r", __FILE__, __LINE__ );
 
-    s = static_cast<char*>(smalloc( sizeof(char) * MAX_LINE, "Read_Force_Field::s" ));
-    tmp = static_cast<char**>(smalloc( sizeof(char *) * MAX_TOKENS, "Read_Force_Field::tmp"));
+    s = static_cast<char*>(smalloc( sizeof(char) * MAX_LINE, __FILE__, __LINE__ ));
+    tmp = static_cast<char**>(smalloc( sizeof(char *) * MAX_TOKENS, __FILE__, __LINE__ ));
     for (i = 0; i < MAX_TOKENS; i++)
     {
-        tmp[i] = static_cast<char*>(smalloc( sizeof(char) * MAX_TOKEN_LEN, "Read_Force_Field::tmp[i]" ));
+        tmp[i] = static_cast<char*>(smalloc( sizeof(char) * MAX_TOKEN_LEN, __FILE__, __LINE__ ));
     }
 
     /* reading first header comment */
@@ -82,12 +77,12 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
     if ( n < 1 )
     {
         fprintf( stderr, "[WARNING] p%d: number of globals in ffield file is 0!\n",
-                 system->my_rank );
+              system->my_rank );
         return;
     }
 
     reax->gp.n_global = n;
-    reax->gp.l = static_cast<real*>(smalloc( sizeof(real) * n, "Read_Force_Field::reax->gp.l" ));
+    reax->gp.l = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
 
     /* see reax_types.h for mapping between l[i] and the lambdas used in ff */
     for (i = 0; i < n; i++)
@@ -123,22 +118,22 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
     __N = reax->num_atom_types;
 
     reax->sbp = static_cast<single_body_parameters*>(scalloc( reax->num_atom_types, sizeof(single_body_parameters),
-                                                              "Read_Force_Field::reax->sbp" ));
+            __FILE__, __LINE__ ));
 
     reax->tbp = static_cast<two_body_parameters*>(scalloc( POW(reax->num_atom_types, 2.0), sizeof(two_body_parameters),
-                                                           "Read_Force_Field::reax->tbp" ));
+                                                           __FILE__, __LINE__ ));
 
     reax->thbp = static_cast<three_body_header*>(scalloc( POW(reax->num_atom_types, 3.0), sizeof(three_body_header),
-                                                          "Read_Force_Field::reax->thbp" ));
+                                                          __FILE__, __LINE__ ));
 
     reax->hbp = static_cast<hbond_parameters*>(scalloc( POW(reax->num_atom_types, 3.0), sizeof(hbond_parameters),
-                                                        "Read_Force_Field::reax->hbp" ));
+                                                        __FILE__, __LINE__ ));
 
     reax->fbp = static_cast<four_body_header*>(scalloc( POW(reax->num_atom_types, 4.0), sizeof(four_body_header),
-                                                        "Read_Force_Field::reax->fbp" ));
+                                                        __FILE__, __LINE__ ));
 
     tor_flag = static_cast<char*>(scalloc( POW(reax->num_atom_types, 4.0), sizeof(char),
-                                           "Read_Force_Field::tor_flag" ));
+                                           __FILE__, __LINE__ ));
 
     /* vdWaals type:
      * 1: Shielded Morse, no inner-wall
@@ -168,7 +163,7 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
 
 #if defined(DEBUG_FOCUS)
         fprintf( stderr, "p%d: Atom Name in the force field : %s \n",
-                 system->my_rank, reax->sbp[i].name );
+                system->my_rank, reax->sbp[i].name );
 #endif
 
         val = atof(tmp[1]);
@@ -270,19 +265,19 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
                 if ( reax->gp.vdw_type != 0 && reax->gp.vdw_type != 3 )
                 {
                     fprintf( stderr, "[WARNING] p%d: inconsistent vdWaals-parameters\n"
-                                     "Force field parameters for element %s\n"
-                                     "indicate inner wall+shielding, but earlier\n"
-                                     "atoms indicate different vdWaals-method.\n"
-                                     "This may cause division-by-zero errors.\n"
-                                     "Keeping vdWaals-setting for earlier atoms.\n",
-                                     system->my_rank, reax->sbp[i].name );
+                            "Force field parameters for element %s\n"
+                            "indicate inner wall+shielding, but earlier\n"
+                            "atoms indicate different vdWaals-method.\n"
+                            "This may cause division-by-zero errors.\n"
+                            "Keeping vdWaals-setting for earlier atoms.\n",
+                            system->my_rank, reax->sbp[i].name );
                 }
                 else
                 {
                     reax->gp.vdw_type = 3;
 #if defined(DEBUG_FOCUS)
                     fprintf( stderr, "p%d: vdWaals type for element %s: Shielding+inner-wall",
-                             system->my_rank, reax->sbp[i].name );
+                            system->my_rank, reax->sbp[i].name );
 #endif
                 }
             }
@@ -292,7 +287,7 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
                 if ( reax->gp.vdw_type != 0 && reax->gp.vdw_type != 2 )
                 {
                     fprintf( stderr, "[WARNING] p%d: inconsistent vdWaals-parameters\n",
-                             system->my_rank );
+                            system->my_rank );
                     fprintf( stderr, "    [INFO] Force field parameters for element %s\n", reax->sbp[i].name );
                     fprintf( stderr, "    [INFO] indicate inner wall without shielding, but earlier\n" );
                     fprintf( stderr, "    [INFO] atoms indicate different vdWaals-method.\n" );
@@ -304,7 +299,7 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
                     reax->gp.vdw_type = 2;
 #if defined(DEBUG_FOCUS)
                     fprintf( stderr, "p%d: vdWaals type for element%s: No Shielding,inner-wall",
-                             system->my_rank, reax->sbp[i].name );
+                            system->my_rank, reax->sbp[i].name );
 #endif
                 }
             }
@@ -317,26 +312,26 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
             {
                 if ( reax->gp.vdw_type != 0 && reax->gp.vdw_type != 1 )
                     fprintf( stderr, "[WARNING] p%d: inconsistent vdWaals-parameters\n" \
-                    "    [INFO] Force field parameters for element %s\n"        \
-                    "    [INFO] indicate  shielding without inner wall, but earlier\n" \
-                    "    [INFO] atoms indicate different vdWaals-method.\n"     \
-                    "    [INFO] This may cause division-by-zero errors.\n"      \
-                    "    [INFO] Keeping vdWaals-setting for earlier atoms.\n",
-                    system->my_rank, reax->sbp[i].name );
+                            "    [INFO] Force field parameters for element %s\n"        \
+                            "    [INFO] indicate  shielding without inner wall, but earlier\n" \
+                            "    [INFO] atoms indicate different vdWaals-method.\n"     \
+                            "    [INFO] This may cause division-by-zero errors.\n"      \
+                            "    [INFO] Keeping vdWaals-setting for earlier atoms.\n",
+                            system->my_rank, reax->sbp[i].name );
                 else
                 {
                     reax->gp.vdw_type = 1;
 #if defined(DEBUG_FOCUS)
                     fprintf( stderr, "p%d, vdWaals type for element%s: Shielding,no inner-wall",
-                             system->my_rank, reax->sbp[i].name );
+                            system->my_rank, reax->sbp[i].name );
 #endif
                 }
             }
             else
             {
                 fprintf( stderr, "[ERROR] p%d: inconsistent vdWaals-parameters\n" \
-                "    [INFO] No shielding or inner-wall set for element %s\n",
-                system->my_rank, reax->sbp[i].name );
+                         "    [INFO] No shielding or inner-wall set for element %s\n",
+                         system->my_rank, reax->sbp[i].name );
                 MPI_Abort( MPI_COMM_WORLD, INVALID_INPUT );
             }
         }
@@ -350,10 +345,10 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
     for ( i = 0; i < reax->num_atom_types; i++ )
     {
         if ( reax->sbp[i].mass < 21 &&
-        reax->sbp[i].valency_val != reax->sbp[i].valency_boc )
+                reax->sbp[i].valency_val != reax->sbp[i].valency_boc )
         {
             fprintf( stderr, "[WARNING] p%d: changed valency_val to valency_boc for atom type %s\n",
-                     system->my_rank, reax->sbp[i].name );
+                    system->my_rank, reax->sbp[i].name );
             reax->sbp[i].valency_val = reax->sbp[i].valency_boc;
         }
     }
@@ -582,7 +577,7 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
         index2 = m * __N * __N + k * __N + j;
 
         if ( j < reax->num_atom_types && k < reax->num_atom_types
-        && m < reax->num_atom_types )
+                && m < reax->num_atom_types )
         {
             cnt = reax->thbp[index1].cnt;
             reax->thbp[index1].cnt++;
@@ -664,7 +659,7 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
         if ( j >= 0 && n >= 0 )
         {
             if ( j < reax->num_atom_types && k < reax->num_atom_types &&
-            m < reax->num_atom_types && n < reax->num_atom_types )
+                    m < reax->num_atom_types && n < reax->num_atom_types )
             {
                 /* these flags ensure that this entry take precedence
                    over the compact form entries */
@@ -767,11 +762,11 @@ void Read_Force_Field_File( const char * const ffield_file, reax_interaction * c
     /* deallocate helper storage */
     for ( i = 0; i < MAX_TOKENS; i++ )
     {
-        sfree( tmp[i], "Read_Force_Field::tmp[i]" );
+        sfree( tmp[i], __FILE__, __LINE__ );
     }
-    sfree( tmp, "Read_Force_Field::tmp" );
-    sfree( s, "Read_Force_Field::s" );
-    sfree( tor_flag, "Read_Force_Field::tor_flag" );
+    sfree( tmp, __FILE__, __LINE__ );
+    sfree( s, __FILE__, __LINE__ );
+    sfree( tor_flag, __FILE__, __LINE__ );
 
-    sfclose( fp, "Read_Force_Field::fp" );
+    sfclose( fp, __FILE__, __LINE__ );
 }

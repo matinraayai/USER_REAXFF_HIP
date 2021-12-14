@@ -2,15 +2,10 @@
   PuReMD - Purdue ReaxFF Molecular Dynamics Program
 
   Copyright (2010) Purdue University
-  Hasan Metin Aktulga, hmaktulga@lbl.gov
+  Hasan Metin Aktulga, haktulga@cs.purdue.edu
   Joseph Fogarty, jcfogart@mail.usf.edu
   Sagar Pandit, pandit@usf.edu
   Ananth Y Grama, ayg@cs.purdue.edu
-
-  Please cite the related publication:
-  H. M. Aktulga, J. C. Fogarty, S. A. Pandit, A. Y. Grama,
-  "Parallel Reactive Molecular Dynamics: Numerical Methods and
-  Algorithmic Techniques", Parallel Computing, in press.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -41,14 +36,14 @@
 
 
 void Read_Control_File( const char * const control_file, control_params * const control,
-                        output_controls * const out_control )
-                        {
+        output_controls * const out_control )
+{
     FILE *fp;
     char *s, **tmp;
     int c, i, ival;
     real val;
 
-    fp = sfopen( control_file, "r", "Read_Control_File::fp" );
+    fp = sfopen( control_file, "r", __FILE__, __LINE__ );
 
     /* assign default values */
     strncpy( control->sim_name, "default.sim", sizeof(control->sim_name) - 1 );
@@ -63,6 +58,7 @@ void Read_Control_File( const char * const control_file, control_params * const 
     control->procs_by_dim[2] = 1;
     control->geo_format = 1;
     control->gpus_per_node = 1;
+    control->gpu_streams = MAX_HIP_STREAMS;
 
     control->random_vel = 0;
     control->restart = 0;
@@ -100,6 +96,7 @@ void Read_Control_File( const char * const control_file, control_params * const 
     control->cm_solver_pre_comp_droptol = 0.01;
     control->cm_solver_pre_app_type = TRI_SOLVE_PA;
     control->cm_solver_pre_app_jacobi_iters = 50;
+    control->polarization_energy_enabled = TRUE;
 
     control->T_init = 0.0;
     control->T_final = 300.;
@@ -137,11 +134,11 @@ void Read_Control_File( const char * const control_file, control_params * const 
     control->restrict_type = 0;
 
     /* memory allocations */
-    s = (char*) smalloc( sizeof(char) * MAX_LINE, "Read_Control_File::s" );
-    tmp = (char**) smalloc( sizeof(char*) * MAX_TOKENS, "Read_Control_File::tmp" );
+    s = static_cast<char*>(smalloc( sizeof(char) * MAX_LINE, __FILE__, __LINE__ ));
+    tmp = static_cast<char**>(smalloc( sizeof(char*) * MAX_TOKENS, __FILE__, __LINE__ ));
     for ( i = 0; i < MAX_TOKENS; i++ )
     {
-        tmp[i] = (char*) smalloc( sizeof(char) * MAX_LINE, "Read_Control_File::tmp[i]" );
+        tmp[i] = static_cast<char*>(smalloc( sizeof(char) * MAX_LINE, __FILE__, __LINE__ ));
     }
 
     /* read control parameters file */
@@ -176,6 +173,18 @@ void Read_Control_File( const char * const control_file, control_params * const 
                 ival = atoi(tmp[1]);
                 control->gpus_per_node = ival;
             }
+            else if ( strncmp(tmp[0], "gpu_streams", MAX_LINE) == 0 )
+            {
+                ival = atoi(tmp[1]);
+                control->gpu_streams = ival;
+
+                if ( control->gpu_streams <= 0 || control->gpu_streams > MAX_HIP_STREAMS )
+                {
+                    fprintf( stderr, "[ERROR] invalid control file value for gpu_streams (0 < gpu_streams <= %d). Terminating...\n",
+                            MAX_HIP_STREAMS );
+                    exit( INVALID_INPUT );
+                }
+            }
             else if ( strncmp(tmp[0], "proc_by_dim", MAX_LINE) == 0 )
             {
                 if ( c < 4 )
@@ -199,16 +208,16 @@ void Read_Control_File( const char * const control_file, control_params * const 
                 // skip since not supported in distributed memory code
                 ;
             }
-            //            else if( strncmp(tmp[0], "restart", MAX_LINE) == 0 )
-            //            {
-            //                ival = atoi(tmp[1]);
-            //                control->restart = ival;
-            //            }
-            //            else if( strncmp(tmp[0], "restart_from", MAX_LINE) == 0 )
-            //            {
-            //                strncpy( control->restart_from, tmp[1], sizeof(control->restart_from) - 1 );
-            //                control->restart_from[sizeof(control->restart_from) - 1] = '\0';
-            //            }
+//            else if( strncmp(tmp[0], "restart", MAX_LINE) == 0 )
+//            {
+//                ival = atoi(tmp[1]);
+//                control->restart = ival;
+//            }
+//            else if( strncmp(tmp[0], "restart_from", MAX_LINE) == 0 )
+//            {
+//                strncpy( control->restart_from, tmp[1], sizeof(control->restart_from) - 1 );
+//                control->restart_from[sizeof(control->restart_from) - 1] = '\0';
+//            }
             else if ( strncmp(tmp[0], "random_vel", MAX_LINE) == 0 )
             {
                 ival = atoi(tmp[1]);
@@ -378,6 +387,11 @@ void Read_Control_File( const char * const control_file, control_params * const 
                 ival = atoi( tmp[1] );
                 control->cm_solver_pre_app_jacobi_iters = ival;
             }
+            else if ( strncmp(tmp[0], "include_polarization_energy", MAX_LINE) == 0 )
+            {
+                ival = atoi( tmp[1] );
+                control->polarization_energy_enabled = ival;
+            }
             else if ( strncmp(tmp[0], "temp_init", MAX_LINE) == 0 )
             {
                 val = atof(tmp[1]);
@@ -451,7 +465,7 @@ void Read_Control_File( const char * const control_file, control_params * const 
             {
                 val = atof(tmp[1]);
                 control->Tau_PT[0] = control->Tau_PT[1] = control->Tau_PT[2] =
-                        val * 1.e-3;  // convert pt_mass from fs to ps
+                                         val * 1.e-3;  // convert pt_mass from fs to ps
             }
             else if ( strncmp(tmp[0], "compress", MAX_LINE) == 0 )
             {
@@ -523,8 +537,8 @@ void Read_Control_File( const char * const control_file, control_params * const 
                 // skip since not supported in distributed memory code
                 ;
             }
-            else if ( strncmp(tmp[0], "molecular_analysis", MAX_LINE) == 0
-            || strncmp(tmp[0], "molec_anal", MAX_LINE) == 0 )
+            else if ( strncmp(tmp[0], "molecular_analysis", MAX_LINE) == 0 
+                    || strncmp(tmp[0], "molec_anal", MAX_LINE) == 0 )
             {
                 ival = atoi(tmp[1]);
                 control->molecular_analysis = ival;
@@ -594,10 +608,10 @@ void Read_Control_File( const char * const control_file, control_params * const 
     /* free memory allocations at the top */
     for ( i = 0; i < MAX_TOKENS; i++ )
     {
-        sfree( tmp[i], "Read_Control_File::tmp[i]" );
+        sfree( tmp[i], __FILE__, __LINE__ );
     }
-    sfree( tmp, "Read_Control_File::tmp" );
-    sfree( s, "Read_Control_File::s" );
+    sfree( tmp, __FILE__, __LINE__ );
+    sfree( s, __FILE__, __LINE__ );
 
-    sfclose( fp, "Read_Control_Field::fp" );
+    sfclose( fp, __FILE__, __LINE__ );
 }

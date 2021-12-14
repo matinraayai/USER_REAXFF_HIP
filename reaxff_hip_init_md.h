@@ -1,11 +1,11 @@
 
-#ifndef __CUDA_INIT_MD_H__
-#define __CUDA_INIT_MD_H__
+#ifndef __HIP_INIT_MD_H__
+#define __HIP_INIT_MD_H__
 
-#if defined(PURE_REAX)
-    #include "reax_types.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_types.h"
+#else
+    #include "../reax_types.h"
 #endif
 
 

@@ -22,42 +22,19 @@
 #ifndef __CUDA_LIST_H_
 #define __CUDA_LIST_H_
 
-#include "reaxff_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+    #include "reaxff_list.h"
+#else
+    #include "../reax_types.h"
+    #include "../list.h"
+#endif
 
-#include "reaxff_list.h"
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-static inline HIP_HOST_DEVICE int Hip_Num_Entries( int i, reax_list *l )
-{
-    return l->end_index[i] - l->index[i];
-}
-
-static inline HIP_HOST_DEVICE int Hip_Start_Index( int i, reax_list *l )
-{
-    return l->index[i];
-}
-
-static inline HIP_HOST_DEVICE int Hip_End_Index( int i, reax_list *l )
-{
-    return l->end_index[i];
-}
-
-static inline HIP_HOST_DEVICE void Hip_Set_Start_Index( int i, int val, reax_list *l )
-{
-    l->index[i] = val;
-}
-
-static inline HIP_HOST_DEVICE void Hip_Set_End_Index( int i, int val, reax_list *l )
-{
-    l->end_index[i] = val;
-}
-
-void Hip_Adjust_End_Index_Before_ReAllocation(int oldN, int systemN, reax_list **gpu_lists);
-
-void Hip_Copy_Far_Neighbors_List_Host_to_Device(reax_system *system, reax_list **gpu_lists, reax_list *cpu_lists);
 
 void Hip_Make_List( int, int, int, reax_list * );
 

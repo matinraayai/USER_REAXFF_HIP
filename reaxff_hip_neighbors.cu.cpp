@@ -19,16 +19,27 @@
   See the GNU General Public License for more details:
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
+#if defined(LAMMPS_REAX)
+    #include "reaxff_hip_neighbors.h"
 
-#include "reaxff_hip_neighbors.h"
+    #include "reaxff_hip_list.h"
+    #include "reaxff_hip_utils.h"
+    #include "reaxff_hip_reduction.h"
 
-#include "reaxff_hip_list.h"
-#include "reaxff_hip_utils.h"
-#include "reaxff_hip_reduction.h"
+    #include "reaxff_index_utils.h"
+    #include "reaxff_tool_box.h"
+    #include "reaxff_vector.h"
+#else
+    #include "hip_neighbors.h"
 
-#include "reaxff_hip_index_utils.h"
-#include "reaxff_tool_box.h"
-#include "reaxff_vector.h"
+    #include "hip_list.h"
+    #include "hip_utils.h"
+    #include "hip_reduction.h"
+
+    #include "../index_utils.h"
+    #include "../tool_box.h"
+    #include "../vector.h"
+#endif
 
 
 HIP_DEVICE real Hip_DistSqr_to_Special_Point( rvec cp, rvec x )
@@ -167,7 +178,7 @@ HIP_GLOBAL void k_generate_neighbor_lists_full( reax_atom *my_atoms,
 HIP_GLOBAL void k_mt_generate_neighbor_lists( reax_atom *my_atoms,
         simulation_box my_ext_box, grid g, reax_list far_nbr_list, int n, int N )
 {
-    HIP_DYNAMIC_SHARED( int, __nbr)
+    extern __shared__ int __nbr[];
     bool nbrgen;
     int __THREADS_PER_ATOM__, thread_id, group_id, lane_id, my_bucket;
     int *tnbr, *nbrssofar;
@@ -493,7 +504,8 @@ HIP_GLOBAL void k_estimate_neighbors_full( reax_atom *my_atoms,
 
 
 extern "C" int Hip_Generate_Neighbor_Lists( reax_system *system,
-        simulation_data *data, storage *workspace, reax_list **lists )
+        control_params *control, simulation_data *data, storage *workspace,
+        reax_list **lists )
 {
     int blocks, ret, ret_far_nbr;
 #if defined(LOG_PERFORMANCE)
@@ -505,20 +517,22 @@ extern "C" int Hip_Generate_Neighbor_Lists( reax_system *system,
         hipEventCreate( &time_event[i] );
     }
 
-    hipEventRecord( time_event[0] );
+    hipEventRecord( time_event[0], control->streams[0] );
 #endif
 
     /* reset reallocation flag on device */
     /* careful: this wrapper around hipMemset(...) performs a byte-wide assignment
      * to the provided literal */
-    hip_memset( system->d_realloc_far_nbrs, FALSE, sizeof(int),
-            "Hip_Generate_Neighbor_Lists::d_realloc_far_nbrs" );
+    sHipMemsetAsync( system->d_realloc_far_nbrs, FALSE, sizeof(int),
+            control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
     /* one thread per atom implementation */
     blocks = (system->N / NBRS_BLOCK_SIZE) +
         ((system->N % NBRS_BLOCK_SIZE) == 0 ? 0 : 1);
 
-    hipLaunchKernelGGL(k_generate_neighbor_lists_full, dim3(blocks), dim3(NBRS_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->my_ext_box,
+    k_generate_neighbor_lists_full <<< blocks, NBRS_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( system->d_my_atoms, system->my_ext_box,
           system->d_my_grid, *(lists[FAR_NBRS]),
           system->n, system->N,
           system->d_far_nbrs, system->d_max_far_nbrs, system->d_realloc_far_nbrs );
@@ -529,20 +543,21 @@ extern "C" int Hip_Generate_Neighbor_Lists( reax_system *system,
 //        (((system->N * NB_KER_THREADS_PER_ATOM) % NBRS_BLOCK_SIZE) == 0 ? 0 : 1);
 //    k_mt_generate_neighbor_lists <<< blocks, NBRS_BLOCK_SIZE, 
 //        //sizeof(int) * (NBRS_BLOCK_SIZE + NBRS_BLOCK_SIZE / NB_KER_THREADS_PER_ATOM) >>>
-//        sizeof(int) * 2 * NBRS_BLOCK_SIZE >>>
+//        sizeof(int) * 2 * NBRS_BLOCK_SIZE, control->streams[0] >>>
 //            ( system->d_my_atoms, system->my_ext_box, system->d_my_grid,
 //              *(lists[FAR_NBRS]), system->n, system->N );
 //    hipCheckError( );
 
     /* check reallocation flag on device */
-    sHipMemcpy( &ret_far_nbr, system->d_realloc_far_nbrs, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+    sHipMemcpyAsync( &ret_far_nbr, system->d_realloc_far_nbrs, sizeof(int),
+            hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
     ret = (ret_far_nbr == FALSE) ? SUCCESS : FAILURE;
     workspace->d_workspace->realloc.far_nbrs = ret_far_nbr;
 
 #if defined(LOG_PERFORMANCE)
-    hipEventRecord( time_event[1] );
+    hipEventRecord( time_event[1], control->streams[0] );
 
     if ( hipEventQuery( time_event[0] ) != hipSuccess ) 
     {
@@ -565,7 +580,8 @@ extern "C" int Hip_Generate_Neighbor_Lists( reax_system *system,
 /* Estimate the number of far neighbors for each atoms 
  *
  * system: atomic system info */
-void Hip_Estimate_Num_Neighbors( reax_system *system, simulation_data *data )
+void Hip_Estimate_Num_Neighbors( reax_system *system, control_params *control,
+        simulation_data *data )
 {
     int blocks;
 #if defined(LOG_PERFORMANCE)
@@ -583,15 +599,17 @@ void Hip_Estimate_Num_Neighbors( reax_system *system, simulation_data *data )
     blocks = system->total_cap / DEF_BLOCK_SIZE
         + (system->total_cap % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-    hipLaunchKernelGGL(k_estimate_neighbors_full, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->my_ext_box, system->d_my_grid,
+    k_estimate_neighbors_full <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( system->d_my_atoms, system->my_ext_box, system->d_my_grid,
           system->n, system->N, system->total_cap,
           system->d_far_nbrs, system->d_max_far_nbrs );
     hipCheckError( );
 
     Hip_Reduction_Sum( system->d_max_far_nbrs, system->d_total_far_nbrs,
-            system->total_cap );
-    sHipMemcpy( &system->total_far_nbrs, system->d_total_far_nbrs, sizeof(int),
-            hipMemcpyDeviceToHost, __FILE__, __LINE__ );
+            system->total_cap, 0, control->streams[0] );
+    sHipMemcpyAsync( &system->total_far_nbrs, system->d_total_far_nbrs, sizeof(int),
+            hipMemcpyDeviceToHost, control->streams[0], __FILE__, __LINE__ );
+    hipStreamSynchronize( control->streams[0] );
 
 #if defined(LOG_PERFORMANCE)
     hipEventRecord( time_event[1] );

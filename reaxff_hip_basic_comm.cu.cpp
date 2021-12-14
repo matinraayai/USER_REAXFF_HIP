@@ -1,14 +1,7 @@
+
 #include "hip/hip_runtime.h"
 
-#if defined(PURE_REAX)
-    #include "hip_basic_comm.h"
-
-    #include "hip_utils.h"
-
-    #include "../comm_tools.h"
-    #include "../tool_box.h"
-    #include "../vector.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_basic_comm.h"
 
     #include "reaxff_hip_utils.h"
@@ -16,12 +9,21 @@
     #include "reaxff_comm_tools.h"
     #include "reaxff_tool_box.h"
     #include "reaxff_vector.h"
+#else
+    #include "hip_basic_comm.h"
+
+    #include "hip_utils.h"
+
+    #include "../comm_tools.h"
+    #include "../tool_box.h"
+    #include "../vector.h"
 #endif
 
 
-typedef void (*dist_packer)( void const * const, mpi_out_data * const );
-typedef void (*coll_unpacker)( void const * const, void * const,
-        mpi_out_data * const );
+typedef void (*hip_dist_packer)( void const * const, mpi_out_data * const,
+        hipStream_t );
+typedef void (*hip_coll_unpacker)( void const * const, void * const,
+        mpi_out_data * const, hipStream_t );
 
 
 /* copy integer entries from buffer to MPI egress buffer
@@ -169,7 +171,7 @@ HIP_GLOBAL void k_real_unpacker( real const * const in, int const * const index,
         return;
     }
 
-    buf[ index[i] ] = in[i];
+    buf[ index[i] ] += in[i];
 }
 
 
@@ -222,17 +224,19 @@ HIP_GLOBAL void k_rvec2_unpacker( rvec2 const * const in, int const * const inde
 }
 
 
-static void int_packer( void const * const dummy, mpi_out_data * const out_buf )
+static void int_packer( void const * const dummy, mpi_out_data * const out_buf,
+       hipStream_t s)
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_int_packer, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (int *) dummy, out_buf->index, (int *) out_buf->out_atoms, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_int_packer <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (int *) dummy, out_buf->index, (int *) out_buf->out_atoms, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
@@ -243,98 +247,107 @@ static void real_packer( void const * const dummy, mpi_out_data * const out_buf 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_real_packer, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (real *) dummy, out_buf->index, (real *) out_buf->out_atoms, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_real_packer <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (real *) dummy, out_buf->index, (real *) out_buf->out_atoms, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
-static void rvec_packer( void const * const dummy, mpi_out_data * const out_buf )
+static void rvec_packer( void const * const dummy, mpi_out_data * const out_buf,
+       hipStream_t s)
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_rvec_packer, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (rvec *) dummy, out_buf->index, (rvec *) out_buf->out_atoms, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_rvec_packer <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (rvec *) dummy, out_buf->index, (rvec *) out_buf->out_atoms, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
-static void rvec2_packer( void const * const dummy, mpi_out_data * const out_buf )
+static void rvec2_packer( void const * const dummy, mpi_out_data * const out_buf,
+       hipStream_t s)
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_rvec2_packer, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (rvec2 *) dummy, out_buf->index, (rvec2 *) out_buf->out_atoms, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_rvec2_packer <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (rvec2 *) dummy, out_buf->index, (rvec2 *) out_buf->out_atoms, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
 static void int_unpacker( void const * const dummy_in, void * const dummy_buf,
-        mpi_out_data * const out_buf )
+        mpi_out_data * const out_buf, hipStream_t s )
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_int_unpacker, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (int *) dummy_in, out_buf->index, (int *) dummy_buf, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_int_unpacker <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (int *) dummy_in, out_buf->index, (int *) dummy_buf, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
 static void real_unpacker( void const * const dummy_in, void * const dummy_buf,
-        mpi_out_data * const out_buf )
+        mpi_out_data * const out_buf, hipStream_t s )
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_real_unpacker, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (real *) dummy_in, out_buf->index, (real *) dummy_buf, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_real_unpacker <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (real *) dummy_in, out_buf->index, (real *) dummy_buf, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
 static void rvec_unpacker( void const * const dummy_in, void * const dummy_buf,
-        mpi_out_data * const out_buf )
+        mpi_out_data * const out_buf, hipStream_t s )
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_rvec_unpacker, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (rvec *) dummy_in, out_buf->index, (rvec *) dummy_buf, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_rvec_unpacker <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (rvec *) dummy_in, out_buf->index, (rvec *) dummy_buf, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
 static void rvec2_unpacker( void const * const dummy_in, void * const dummy_buf,
-        mpi_out_data * const out_buf )
+        mpi_out_data * const out_buf, hipStream_t s )
 {
     int blocks;
 
     blocks = (out_buf->cnt / DEF_BLOCK_SIZE)
         + ((out_buf->cnt % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_rvec2_unpacker, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  (rvec2 *) dummy_in, out_buf->index, (rvec2 *) dummy_buf, out_buf->cnt );
-    /* explicitly wait for kernel compilation as MPI calls need buffer prepared */
-    hipDeviceSynchronize( );
+    k_rvec2_unpacker <<< blocks, DEF_BLOCK_SIZE, 0, s >>>
+        ( (rvec2 *) dummy_in, out_buf->index, (rvec2 *) dummy_buf, out_buf->cnt );
     hipCheckError( );
+
+    hipStreamSynchronize( s );
 }
 
 
@@ -371,9 +384,9 @@ static void * Get_Buffer_Offset( void const * const buffer,
 }
 
 
-static dist_packer Get_Packer( int type )
+static hip_dist_packer Get_Packer( int type )
 {
-    dist_packer func_ptr;
+    hip_dist_packer func_ptr;
 
     switch ( type )
     {
@@ -403,9 +416,9 @@ static dist_packer Get_Packer( int type )
 }
 
 
-static coll_unpacker Get_Unpacker( int type )
+static hip_coll_unpacker Get_Unpacker( int type )
 {
-    coll_unpacker func_ptr;
+    hip_coll_unpacker func_ptr;
 
     switch ( type )
     {
@@ -435,8 +448,9 @@ static coll_unpacker Get_Unpacker( int type )
 }
 
 
-void Hip_Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
-        void const * const buf, int buf_type, MPI_Datatype type )
+void Hip_Dist( reax_system const * const system, storage * const workspace,
+        mpi_datatypes * const mpi_data, void const * const buf,
+        int buf_type, MPI_Datatype type, hipStream_t s )
 {
     int d, cnt1, cnt2, ret;
     mpi_out_data *out_bufs;
@@ -444,13 +458,14 @@ void Hip_Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
     MPI_Request req1, req2;
     MPI_Status stat1, stat2;
     const neighbor_proc *nbr1, *nbr2;
-    dist_packer pack;
+    hip_dist_packer pack;
     MPI_Aint extent, lower_bound;
     size_t type_size;
 
     ret = MPI_Type_get_extent( type, &lower_bound, &extent );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
-    type_size = MPI_Aint_add( lower_bound, extent );
+//    type_size = MPI_Aint_add( lower_bound, extent );
+    type_size = extent;
 
     comm = mpi_data->comm_mesh3D;
     out_bufs = mpi_data->d_out_buffers;
@@ -462,31 +477,57 @@ void Hip_Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
         nbr2 = &system->my_nbrs[2 * d + 1];
 
         /* pack MPI buffers and initiate sends */
-        hip_check_malloc( &out_bufs[2 * d].out_atoms,
+        sHipCheckMalloc( &out_bufs[2 * d].out_atoms,
                 &out_bufs[2 * d].out_atoms_size,
-                type_size * out_bufs[2 * d].cnt,
-                "Hip_Dist::mpi_data->out_atoms" );
-        hip_check_malloc( (void **) &out_bufs[2 * d].index,
-                &out_bufs[2 * d].index_size,
-                sizeof(int) * out_bufs[2 * d].cnt,
-                "Hip_Dist::mpi_data->index" );
+                type_size * out_bufs[2 * d].cnt, __FILE__, __LINE__ );
+	if ( out_bufs[2 * d].index_size < sizeof(int) * out_bufs[2 * d].cnt )
+	{
+            sHipCheckMalloc( &workspace->scratch[3], &workspace->scratch_size[3],
+                    out_bufs[2 * d].index_size, __FILE__, __LINE__ );
 
-        pack( buf, &out_bufs[2 * d] );
+            sHipMemcpyAsync( workspace->scratch[3], out_bufs[2 * d].index,
+                    out_bufs[2 * d].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+            sHipFree( out_bufs[2 * d].index, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &out_bufs[2 * d].index,
+                    (size_t) CEIL( (sizeof(int) * out_bufs[2 * d].cnt) * SAFE_ZONE ),
+                    __FILE__, __LINE__ );
+            sHipMemcpyAsync( out_bufs[2 * d].index, workspace->scratch[3],
+                    out_bufs[2 * d].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+
+            out_bufs[2 * d].index_size = (size_t) CEIL( (sizeof(int) * out_bufs[2 * d].cnt) * SAFE_ZONE );
+	}
+
+        pack( buf, &out_bufs[2 * d], s );
 
         ret = MPI_Isend( out_bufs[2 * d].out_atoms, out_bufs[2 * d].cnt,
                 type, nbr1->rank, 2 * d, comm, &req1 );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        hip_check_malloc( &out_bufs[2 * d + 1].out_atoms,
+        sHipCheckMalloc( &out_bufs[2 * d + 1].out_atoms,
                 &out_bufs[2 * d + 1].out_atoms_size,
-                type_size * out_bufs[2 * d + 1].cnt,
-                "Hip_Dist::mpi_data->out_atoms" );
-        hip_check_malloc( (void **) &out_bufs[2 * d + 1].index,
-                &out_bufs[2 * d + 1].index_size,
-                sizeof(int) * out_bufs[2 * d + 1].cnt,
-                "Hip_Dist::mpi_data->index" );
+                type_size * out_bufs[2 * d + 1].cnt, __FILE__, __LINE__ );
+	if ( out_bufs[2 * d + 1].index_size < sizeof(int) * out_bufs[2 * d + 1].cnt )
+	{
+            sHipCheckMalloc( &workspace->scratch[3], &workspace->scratch_size[3],
+                    out_bufs[2 * d + 1].index_size, __FILE__, __LINE__ );
 
-        pack( buf, &out_bufs[2 * d + 1] );
+            sHipMemcpyAsync( workspace->scratch[3], out_bufs[2 * d + 1].index,
+                    out_bufs[2 * d + 1].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+            sHipFree( out_bufs[2 * d + 1].index, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &out_bufs[2 * d + 1].index,
+                    (size_t) CEIL( (sizeof(int) * out_bufs[2 * d + 1].cnt) * SAFE_ZONE ),
+                    __FILE__, __LINE__ );
+            sHipMemcpyAsync( out_bufs[2 * d + 1].index, workspace->scratch[3],
+                    out_bufs[2 * d + 1].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+
+            out_bufs[2 * d + 1].index_size = (size_t) CEIL( (sizeof(int) * out_bufs[2 * d + 1].cnt) * SAFE_ZONE );
+	}
+
+        pack( buf, &out_bufs[2 * d + 1], s );
 
         ret = MPI_Isend( out_bufs[2 * d + 1].out_atoms, out_bufs[2 * d + 1].cnt,
                 type, nbr2->rank, 2 * d + 1, comm, &req2 );
@@ -503,6 +544,11 @@ void Hip_Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
             fprintf( stderr, "[ERROR] MPI_Get_count returned MPI_UNDEFINED\n" );
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
+        else if ( cnt1 + nbr1->atoms_str > system->total_cap )
+        {
+            fprintf( stderr, "[ERROR] Hip_Dist: not enough space in recv buffer for nbr1 (dim = %d)\n", d );
+            MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
+        }
 
         ret = MPI_Recv( Get_Buffer_Offset( buf, nbr1->atoms_str, buf_type ),
                 cnt1, type, nbr1->rank, 2 * d + 1, comm, MPI_STATUS_IGNORE );
@@ -516,6 +562,11 @@ void Hip_Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
         if ( cnt2 == MPI_UNDEFINED )
         {
             fprintf( stderr, "[ERROR] MPI_Get_count returned MPI_UNDEFINED\n" );
+            MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
+        }
+        else if ( cnt2 + nbr2->atoms_str > system->total_cap )
+        {
+            fprintf( stderr, "[ERROR] Hip_Dist: not enough space in recv buffer for nbr2 (dim = %d)\n", d );
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
@@ -531,8 +582,9 @@ void Hip_Dist( reax_system const * const system, mpi_datatypes * const mpi_data,
 }
 
 
-void Hip_Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_data,
-        void const * const buf, int buf_type, MPI_Datatype type )
+void Hip_Dist_FS( reax_system const * const system,  storage * const workspace,
+        mpi_datatypes * const mpi_data, void const * const buf,
+        int buf_type, MPI_Datatype type, hipStream_t s )
 {
     int d, cnt1, cnt2, ret;
     mpi_out_data *out_bufs;
@@ -540,13 +592,14 @@ void Hip_Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_da
     MPI_Request req1, req2;
     MPI_Status stat1, stat2;
     const neighbor_proc *nbr1, *nbr2;
-    dist_packer pack;
+    hip_dist_packer pack;
     MPI_Aint extent, lower_bound;
     size_t type_size;
 
     ret = MPI_Type_get_extent( type, &lower_bound, &extent );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
-    type_size = MPI_Aint_add( lower_bound, extent );
+//    type_size = MPI_Aint_add( lower_bound, extent );
+    type_size = extent;
 
     comm = mpi_data->comm_mesh3D;
     out_bufs = mpi_data->d_out_buffers;
@@ -558,31 +611,57 @@ void Hip_Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_da
         nbr2 = &system->my_nbrs[2 * d + 1];
 
         /* pack MPI buffers and initiate sends */
-        hip_check_malloc( &out_bufs[2 * d].out_atoms,
+        sHipCheckMalloc( &out_bufs[2 * d].out_atoms,
                 &out_bufs[2 * d].out_atoms_size,
-                type_size * out_bufs[2 * d].cnt,
-                "Hip_Dist_FS::mpi_data->out_atoms" );
-        hip_check_malloc( (void **) &out_bufs[2 * d].index,
-                &out_bufs[2 * d].index_size,
-                sizeof(int) * out_bufs[2 * d].cnt,
-                "Hip_Dist_FS::mpi_data->index" );
+                type_size * out_bufs[2 * d].cnt, __FILE__, __LINE__ );
+	if ( out_bufs[2 * d].index_size < sizeof(int) * out_bufs[2 * d].cnt )
+	{
+            sHipCheckMalloc( &workspace->scratch[3], &workspace->scratch_size[3],
+                    out_bufs[2 * d].index_size, __FILE__, __LINE__ );
 
-        pack( buf, &out_bufs[2 * d] );
+            sHipMemcpyAsync( workspace->scratch[3], out_bufs[2 * d].index,
+                    out_bufs[2 * d].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+            sHipFree( out_bufs[2 * d].index, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &out_bufs[2 * d].index,
+                    (size_t) CEIL( (sizeof(int) * out_bufs[2 * d].cnt) * SAFE_ZONE ),
+                    __FILE__, __LINE__ );
+            sHipMemcpyAsync( out_bufs[2 * d].index, workspace->scratch[3],
+                    out_bufs[2 * d].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+
+            out_bufs[2 * d].index_size = (size_t) CEIL( (sizeof(int) * out_bufs[2 * d].cnt) * SAFE_ZONE );
+	}
+
+        pack( buf, &out_bufs[2 * d], s );
 
         ret = MPI_Isend( out_bufs[2 * d].out_atoms, out_bufs[2 * d].cnt,
                 type, nbr1->rank, 2 * d, comm, &req1 );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        hip_check_malloc( &out_bufs[2 * d + 1].out_atoms,
+        sHipCheckMalloc( &out_bufs[2 * d + 1].out_atoms,
                 &out_bufs[2 * d + 1].out_atoms_size,
-                type_size * out_bufs[2 * d + 1].cnt,
-                "Hip_Dist_FS::mpi_data->out_atoms" );
-        hip_check_malloc( (void **) &out_bufs[2 * d + 1].index,
-                &out_bufs[2 * d + 1].index_size,
-                sizeof(int) * out_bufs[2 * d + 1].cnt,
-                "Hip_Dist_FS::mpi_data->index" );
+                type_size * out_bufs[2 * d + 1].cnt, __FILE__, __LINE__ );
+	if ( out_bufs[2 * d + 1].index_size < sizeof(int) * out_bufs[2 * d + 1].cnt )
+	{
+            sHipCheckMalloc( &workspace->scratch[3], &workspace->scratch_size[3],
+                    out_bufs[2 * d + 1].index_size, __FILE__, __LINE__ );
 
-        pack( buf, &out_bufs[2 * d + 1] );
+            sHipMemcpyAsync( workspace->scratch[3], out_bufs[2 * d + 1].index,
+                    out_bufs[2 * d + 1].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+            sHipFree( out_bufs[2 * d + 1].index, __FILE__, __LINE__ );
+            sHipMalloc( (void **) &out_bufs[2 * d + 1].index,
+                    (size_t) CEIL( (sizeof(int) * out_bufs[2 * d + 1].cnt) * SAFE_ZONE ),
+                    __FILE__, __LINE__ );
+            sHipMemcpyAsync( out_bufs[2 * d + 1].index, workspace->scratch[3],
+                    out_bufs[2 * d + 1].index_size,
+                    hipMemcpyDeviceToDevice, s, __FILE__, __LINE__ );
+
+            out_bufs[2 * d + 1].index_size = (size_t) CEIL( (sizeof(int) * out_bufs[2 * d + 1].cnt) * SAFE_ZONE );
+	}
+
+        pack( buf, &out_bufs[2 * d + 1], s );
 
         ret = MPI_Isend( out_bufs[2 * d + 1].out_atoms, out_bufs[2 * d + 1].cnt,
                 type, nbr2->rank, 2 * d + 1, comm, &req2 );
@@ -599,6 +678,11 @@ void Hip_Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_da
             fprintf( stderr, "[ERROR] MPI_Get_count returned MPI_UNDEFINED\n" );
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
+        else if ( cnt1 + nbr1->atoms_str > system->total_cap )
+        {
+            fprintf( stderr, "[ERROR] Hip_Dist_FS: not enough space in recv buffer for nbr1 (dim = %d)\n", d );
+            MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
+        }
 
         ret = MPI_Recv( Get_Buffer_Offset( buf, nbr1->atoms_str, buf_type ),
                 cnt1, type, nbr1->rank, 2 * d + 1, comm, MPI_STATUS_IGNORE );
@@ -612,6 +696,11 @@ void Hip_Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_da
         if ( cnt2 == MPI_UNDEFINED )
         {
             fprintf( stderr, "[ERROR] MPI_Get_count returned MPI_UNDEFINED\n" );
+            MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
+        }
+        else if ( cnt2 + nbr2->atoms_str > system->total_cap )
+        {
+            fprintf( stderr, "[ERROR] Hip_Dist_FS: not enough space in recv buffer for nbr2 (dim = %d)\n", d );
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
@@ -628,7 +717,7 @@ void Hip_Dist_FS( reax_system const * const system, mpi_datatypes * const mpi_da
 
 
 void Hip_Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
-        void * const buf, int buf_type, MPI_Datatype type )
+        void * const buf, int buf_type, MPI_Datatype type, hipStream_t s )
 {   
     int d, cnt1, cnt2, ret;
     mpi_out_data *out_bufs;
@@ -636,13 +725,14 @@ void Hip_Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
     MPI_Request req1, req2;
     MPI_Status stat1, stat2;
     const neighbor_proc *nbr1, *nbr2;
-    coll_unpacker unpack;
+    hip_coll_unpacker unpack;
     MPI_Aint extent, lower_bound;
     size_t type_size;
 
     ret = MPI_Type_get_extent( type, &lower_bound, &extent );
     Check_MPI_Error( ret, __FILE__, __LINE__ );
-    type_size = MPI_Aint_add( lower_bound, extent );
+//    type_size = MPI_Aint_add( lower_bound, extent );
+    type_size = extent;
 
     comm = mpi_data->comm_mesh3D;
     out_bufs = mpi_data->d_out_buffers;
@@ -674,8 +764,8 @@ void Hip_Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
-        hip_check_malloc( &mpi_data->d_in1_buffer, &mpi_data->d_in1_buffer_size,
-                type_size * cnt1, "Hip_Coll::mpi_data->d_in1_buffer" );
+        sHipCheckMalloc( &mpi_data->d_in1_buffer, &mpi_data->d_in1_buffer_size,
+                type_size * cnt1, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->d_in1_buffer, cnt1,
                 type, nbr1->rank, 2 * d + 1, comm, MPI_STATUS_IGNORE );
@@ -692,8 +782,8 @@ void Hip_Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
             MPI_Abort( MPI_COMM_WORLD, RUNTIME_ERROR );
         }
 
-        hip_check_malloc( &mpi_data->d_in2_buffer, &mpi_data->d_in2_buffer_size,
-                type_size * cnt2, "Hip_Coll::mpi_data->d_in2_buffer" );
+        sHipCheckMalloc( &mpi_data->d_in2_buffer, &mpi_data->d_in2_buffer_size,
+                type_size * cnt2, __FILE__, __LINE__ );
 
         ret = MPI_Recv( mpi_data->d_in2_buffer, cnt2,
                 type, nbr2->rank, 2 * d, comm, MPI_STATUS_IGNORE );
@@ -704,7 +794,7 @@ void Hip_Coll( reax_system const * const system, mpi_datatypes * const mpi_data,
         ret = MPI_Wait( &req2, MPI_STATUS_IGNORE );
         Check_MPI_Error( ret, __FILE__, __LINE__ );
 
-        unpack( mpi_data->d_in1_buffer, buf, &out_bufs[2 * d] );
-        unpack( mpi_data->d_in2_buffer, buf, &out_bufs[2 * d + 1] );
+        unpack( mpi_data->d_in1_buffer, buf, &out_bufs[2 * d], s );
+        unpack( mpi_data->d_in2_buffer, buf, &out_bufs[2 * d + 1], s );
     }
 }

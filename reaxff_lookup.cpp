@@ -19,16 +19,12 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-
-
-
 #if (defined(HAVE_CONFIG_H) && !defined(__CONFIG_H_))
   #define __CONFIG_H_
-  #include "config.h"
+  #include "../../common/include/config.h"
 #endif
 
 #if defined(PURE_REAX)
-  #include "reax_types.h"
   #include "lookup.h"
 
   #include "comm_tools.h"
@@ -36,10 +32,9 @@
   #include "nonbonded.h"
   #include "tool_box.h"
   #if defined(HAVE_HIP)
-    #include "hip_lookup.h"
+    #include "hip/hip_lookup.h"
   #endif
 #elif defined(LAMMPS_REAX)
-  #include "reaxff_types.h"
   #include "reaxff_lookup.h"
 
   #include "reaxff_comm_tools.h"
@@ -50,6 +45,8 @@
     #include "reaxff_hip_lookup.h"
   #endif
 #endif
+
+
 
 
 /* Fills solution into x. Warning: will modify c and d! */
@@ -85,11 +82,11 @@ static void Natural_Cubic_Spline( const real * const h, const real * const f,
     real *a, *b, *c, *d, *v;
 
     /* allocate space for the linear system */
-    a = static_cast<real*>(smalloc( sizeof(real) * n, "Natural_Cubic_Spline::a" ));
-    b = static_cast<real*>(smalloc( sizeof(real) * n, "Natural_Cubic_Spline::b" ));
-    c = static_cast<real*>(smalloc( sizeof(real) * n, "Natural_Cubic_Spline::c" ));
-    d = static_cast<real*>(smalloc( sizeof(real) * n, "Natural_Cubic_Spline::d" ));
-    v = static_cast<real*>(smalloc( sizeof(real) * n, "Natural_Cubic_Spline::v" ));
+    a = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    b = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    c = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    d = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    v = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
 
     /* build the linear system */
     a[0] = 0.0;
@@ -136,11 +133,11 @@ static void Natural_Cubic_Spline( const real * const h, const real * const f,
         coef[i - 1].a = f[i];
     }
 
-    sfree( a, "Natural_Cubic_Spline::a" );
-    sfree( b, "Natural_Cubic_Spline::b" );
-    sfree( c, "Natural_Cubic_Spline::c" );
-    sfree( d, "Natural_Cubic_Spline::d" );
-    sfree( v, "Natural_Cubic_Spline::v" );
+    sfree( a, __FILE__, __LINE__ );
+    sfree( b, __FILE__, __LINE__ );
+    sfree( c, __FILE__, __LINE__ );
+    sfree( d, __FILE__, __LINE__ );
+    sfree( v, __FILE__, __LINE__ );
 }
 
 
@@ -150,11 +147,11 @@ static void Complete_Cubic_Spline( const real * const h, const real * const f,
     int i;
     real *a, *b, *c, *d, *v;
 
-    a = static_cast<real*>(smalloc( sizeof(real) * n, "Compute_Cubic_Spline::a" ));
-    b = static_cast<real*>(smalloc( sizeof(real) * n, "Compute_Cubic_Spline::b" ));
-    c = static_cast<real*>(smalloc( sizeof(real) * n, "Compute_Cubic_Spline::c" ));
-    d = static_cast<real*>(smalloc( sizeof(real) * n, "Compute_Cubic_Spline::d" ));
-    v = static_cast<real*>(smalloc( sizeof(real) * n, "Compute_Cubic_Spline::v" ));
+    a = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    b = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    c = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    d = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
+    v = static_cast<real*>(smalloc( sizeof(real) * n, __FILE__, __LINE__ ));
 
     /* build the linear system */
     a[0] = 0.0;
@@ -194,11 +191,11 @@ static void Complete_Cubic_Spline( const real * const h, const real * const f,
         coef[i - 1].a = f[i];
     }
 
-    sfree( a, "Compute_Cubic_Spline::a" );
-    sfree( b, "Compute_Cubic_Spline::b" );
-    sfree( c, "Compute_Cubic_Spline::c" );
-    sfree( d, "Compute_Cubic_Spline::d" );
-    sfree( v, "Compute_Cubic_Spline::v" );
+    sfree( a, __FILE__, __LINE__ );
+    sfree( b, __FILE__, __LINE__ );
+    sfree( c, __FILE__, __LINE__ );
+    sfree( d, __FILE__, __LINE__ );
+    sfree( v, __FILE__, __LINE__ );
 }
 
 
@@ -280,17 +277,17 @@ void Make_LR_Lookup_Table( reax_system * const system, control_params * const co
     num_atom_types = system->reax_param.num_atom_types;
     dr = control->nonb_cut / control->tabulate;
 
-    h = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), "Make_LR_Lookup_Table::h" ));
-    fh = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), "Make_LR_Lookup_Table::fh" ));
-    fvdw = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), "Make_LR_Lookup_Table::fvdw" ));
-    fCEvd = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), "Make_LR_Lookup_Table::fCEvd"));
-    fele = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), "Make_LR_Lookup_Table::fele" ));
-    fCEclmb = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), "Make_LR_Lookup_Table::fCEclmb" ));
+    h = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), __FILE__, __LINE__ ));
+    fh = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), __FILE__, __LINE__ ));
+    fvdw = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), __FILE__, __LINE__ ));
+    fCEvd = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), __FILE__, __LINE__ ));
+    fele = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), __FILE__, __LINE__ ));
+    fCEclmb = static_cast<real*>(scalloc( (control->tabulate + 2), sizeof(real), __FILE__, __LINE__ ));
 
     /* allocate Long-Range LookUp Table space based on
      * number of atom types in the ffield file */
     workspace->LR = static_cast<LR_lookup_table*>(smalloc( sizeof(LR_lookup_table) * num_atom_types * num_atom_types,
-            "Make_LR_Lookup_Table::LR" ));
+                                                           __FILE__, __LINE__ ));
 
     /* most atom types in ffield file will not exist in the current
      * simulation. to avoid unnecessary lookup table space, determine
@@ -325,22 +322,22 @@ void Make_LR_Lookup_Table( reax_system * const system, control_params * const co
                     workspace->LR[ index_lr(i, j, num_atom_types) ].inv_dx = control->tabulate / control->nonb_cut;
                     workspace->LR[ index_lr(i, j, num_atom_types) ].y =
                             static_cast<LR_data*>(smalloc( sizeof(LR_data) * workspace->LR[ index_lr(i, j, num_atom_types) ].n,
-                                    "Make_LR_Lookup_Table::LR[i,j].y" ));
+                                                           __FILE__, __LINE__ ));
                     workspace->LR[ index_lr(i, j, num_atom_types) ].H =
                             static_cast<cubic_spline_coef*>(smalloc( sizeof(cubic_spline_coef) * workspace->LR[ index_lr(i, j, num_atom_types) ].n,
-                                    "Make_LR_Lookup_Table::LR[i,j].H" ));
+                                                                     __FILE__, __LINE__ ));
                     workspace->LR[ index_lr(i, j, num_atom_types) ].vdW =
                             static_cast<cubic_spline_coef*>(smalloc( sizeof(cubic_spline_coef) * workspace->LR[ index_lr(i, j, num_atom_types) ].n,
-                                    "Make_LR_Lookup_Table::LR[i,j].vdW" ));
+                                                                     __FILE__, __LINE__ ));
                     workspace->LR[ index_lr(i, j, num_atom_types) ].CEvd =
                             static_cast<cubic_spline_coef*>(smalloc( sizeof(cubic_spline_coef) * workspace->LR[ index_lr(i, j, num_atom_types) ].n,
-                                    "Make_LR_Lookup_Table::LR[i,j].CEvd" ));
+                                                                     __FILE__, __LINE__ ));
                     workspace->LR[ index_lr(i, j, num_atom_types) ].ele =
                             static_cast<cubic_spline_coef*>(smalloc( sizeof(cubic_spline_coef) * workspace->LR[ index_lr(i, j, num_atom_types) ].n,
-                                    "Make_LR_Lookup_Table::LR[i,j].ele" ));
+                                                                     __FILE__, __LINE__ ));
                     workspace->LR[ index_lr(i, j, num_atom_types) ].CEclmb =
                             static_cast<cubic_spline_coef*>(smalloc( sizeof(cubic_spline_coef) * workspace->LR[ index_lr(i, j, num_atom_types) ].n,
-                                    "Make_LR_Lookup_Table::LR[i,j].CEclmb" ));
+                                                                     __FILE__, __LINE__ ));
 
                     for ( r = 1; r <= control->tabulate; ++r )
                     {
@@ -389,12 +386,12 @@ void Make_LR_Lookup_Table( reax_system * const system, control_params * const co
         }
     }
 
-    sfree( h, "Make_LR_Lookup_Table::h" );
-    sfree( fh, "Make_LR_Lookup_Table::fh" );
-    sfree( fvdw, "Make_LR_Lookup_Table::fvdw" );
-    sfree( fCEvd, "Make_LR_Lookup_Table::fCEvd" );
-    sfree( fele, "Make_LR_Lookup_Table::fele" );
-    sfree( fCEclmb, "Make_LR_Lookup_Table::fCEclmb" );
+    sfree( h, __FILE__, __LINE__ );
+    sfree( fh, __FILE__, __LINE__ );
+    sfree( fvdw, __FILE__, __LINE__ );
+    sfree( fCEvd, __FILE__, __LINE__ );
+    sfree( fele, __FILE__, __LINE__ );
+    sfree( fCEclmb, __FILE__, __LINE__ );
 
 #if defined(HAVE_HIP)
     Hip_Copy_LR_Lookup_Table_Host_to_Device( system, control, workspace, aggregated );
@@ -431,16 +428,22 @@ void Finalize_LR_Lookup_Table( reax_system * const system, control_params * cons
             {
                 if ( aggregated[j] )
                 {
-                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].y, "Finalize_LR_Lookup_Table::LR[ ].y" );
-                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].H, "Finalize_LR_Lookup_Table::LR[ ].H" );
-                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].vdW, "Finalize_LR_Lookup_Table::LR[ ].vdW" );
-                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].CEvd, "Finalize_LR_Lookup_Table::LR[ ].CEvd" );
-                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].ele, "Finalize_LR_Lookup_Table::LR[ ].ele" );
-                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].CEclmb, "Finalize_LR_Lookup_Table::LR[ ].CEclmb" );
+                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].y,
+                            __FILE__, __LINE__ );
+                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].H,
+                            __FILE__, __LINE__ );
+                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].vdW,
+                            __FILE__, __LINE__ );
+                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].CEvd,
+                            __FILE__, __LINE__ );
+                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].ele,
+                            __FILE__, __LINE__ );
+                    sfree( workspace->LR[ index_lr(i, j, num_atom_types) ].CEclmb,
+                            __FILE__, __LINE__ );
                 }
             }
         }
     }
 
-    sfree( workspace->LR, "Finalize_LR_Lookup_Table::LR" );
+    sfree( workspace->LR, __FILE__, __LINE__ );
 }

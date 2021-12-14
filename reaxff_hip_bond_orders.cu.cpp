@@ -1,16 +1,6 @@
 #include "hip/hip_runtime.h"
 
-#if defined(PURE_REAX)
-    #include "hip_bond_orders.h"
-
-    #include "hip_helpers.h"
-    #include "hip_list.h"
-    #include "hip_utils.h"
-    #include "hip_reduction.h"
-
-    #include "../index_utils.h"
-    #include "../bond_orders.h"
-#elif defined(LAMMPS_REAX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_bond_orders.h"
 
     #include "reaxff_hip_helpers.h"
@@ -20,15 +10,23 @@
 
     #include "reaxff_index_utils.h"
     #include "reaxff_bond_orders.h"
+#else
+    #include "hip_bond_orders.h"
+
+    #include "hip_helpers.h"
+    #include "hip_list.h"
+    #include "hip_utils.h"
+    #include "hip_reduction.h"
+
+    #include "../index_utils.h"
+    #include "../bond_orders.h"
 #endif
 
 #include <hipcub/hipcub.hpp>
 
 
-
 HIP_DEVICE void Hip_Add_dBond_to_Forces_NPT( int i, int pj,
-        simulation_data *data, storage *workspace, reax_list *bond_list,
-        rvec data_ext_press )
+        storage * const workspace, reax_list * const bond_list, rvec data_ext_press )
 {
     bond_data *nbr_j, *nbr_k;
     bond_order_data *bo_ij, *bo_ji;
@@ -69,7 +67,7 @@ HIP_DEVICE void Hip_Add_dBond_to_Forces_NPT( int i, int pj,
         nbr_k = &bond_list->bond_list[pk];
         k = nbr_k->nbr;
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         rvec_MakeZero( nbr_k->tf_f );
 #endif
 
@@ -83,7 +81,7 @@ HIP_DEVICE void Hip_Add_dBond_to_Forces_NPT( int i, int pj,
         rvec_ScaledAdd( temp, -coef.C3dbopi2, nbr_k->bo_data.dBOp );
 
         /* force */
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         rvec_Add( nbr_k->tf_f, temp );
 #else
         atomic_rvecAdd( workspace->f[k], temp );
@@ -185,7 +183,7 @@ HIP_DEVICE void Hip_Add_dBond_to_Forces_NPT( int i, int pj,
 
 
 HIP_DEVICE void Hip_Add_dBond_to_Forces( int i, int pj,
-        storage *workspace, reax_list *bond_list, rvec *f_i )
+        storage * const workspace, reax_list * const bond_list, rvec * const f_i )
 {
     bond_data *nbr_j, *nbr_k;
     bond_order_data *bo_ij, *bo_ji;
@@ -229,7 +227,7 @@ HIP_DEVICE void Hip_Add_dBond_to_Forces( int i, int pj,
         /* 3rd, dBOpi2 */
         rvec_ScaledAdd( temp, -coef.C3dbopi2, nbr_k->bo_data.dBOp );
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         rvec_Add( nbr_k->tf_f, temp );
 #else
         atomic_rvecAdd( workspace->f[nbr_k->nbr], temp );
@@ -308,11 +306,10 @@ HIP_DEVICE void Hip_Add_dBond_to_Forces( int i, int pj,
 
 
 /* Initialize arrays */
-HIP_GLOBAL void k_bond_order_part1( reax_atom *my_atoms,
-        single_body_parameters *sbp, storage workspace, int N )
+HIP_GLOBAL void k_bond_order_part1( reax_atom const * const my_atoms,
+        single_body_parameters const * const sbp, storage workspace, int N )
 {
     int i, type_i;
-    single_body_parameters *sbp_i;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -323,21 +320,20 @@ HIP_GLOBAL void k_bond_order_part1( reax_atom *my_atoms,
 
     /* Calculate Deltaprime, Deltaprime_boc values */
     type_i = my_atoms[i].type;
-    sbp_i = &sbp[type_i];
-    workspace.Deltap[i] = workspace.total_bond_order[i] - sbp_i->valency;
+    workspace.Deltap[i] = workspace.total_bond_order[i] - sbp[type_i].valency;
     workspace.Deltap_boc[i] = workspace.total_bond_order[i]
-        - sbp_i->valency_val;
+        - sbp[type_i].valency_val;
     workspace.total_bond_order[i] = 0.0; 
 }
 
 
 /* Main BO calculations */
-HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
-        single_body_parameters *sbp, two_body_parameters *tbp, 
+HIP_GLOBAL void k_bond_order_part2( reax_atom const * const my_atoms, global_parameters gp,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
         storage workspace, reax_list bond_list, int num_atom_types, int N )
 {
     int i, j, pj, type_i, type_j;
-    int start_i, end_i;
+    int start_i, end_i, tbp_ij;
     real val_i, Deltap_i, Deltap_boc_i;
     real val_j, Deltap_j, Deltap_boc_j;
     real f1, f2, f3, f4, f5, f4f5, exp_f4, exp_f5;
@@ -347,8 +343,6 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
     real A0_ij, A1_ij, A2_ij, A2_ji, A3_ij, A3_ji;
     real p_boc1, p_boc2;
     real total_bond_order_i;
-    single_body_parameters *sbp_i;
-    two_body_parameters *twbp;
     bond_order_data *bo_ij;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -363,8 +357,7 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
 
     /* Corrected Bond Order calculations */
     type_i = my_atoms[i].type;
-    sbp_i = &sbp[type_i];
-    val_i = sbp_i->valency;
+    val_i = sbp[type_i].valency;
     Deltap_i = workspace.Deltap[i];
     Deltap_boc_i = workspace.Deltap_boc[i];
     start_i = Start_Index( i, &bond_list );
@@ -380,9 +373,9 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
         //if ( i < j || workspace.bond_mark[j] > 3 )
         if ( i < j )
         {
-            twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
+            tbp_ij = index_tbp(type_i, type_j, num_atom_types);
 
-            if ( twbp->ovc < 0.001 && twbp->v13cor < 0.001 )
+            if ( tbp[tbp_ij].ovc < 0.001 && tbp[tbp_ij].v13cor < 0.001 )
             {
                 /* There is no correction to bond orders nor to derivatives of
                  * bond order prime! So we leave bond orders unchanged and
@@ -409,7 +402,7 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
                 Deltap_boc_j = workspace.Deltap_boc[j];
 
                 /* on page 1 */
-                if ( twbp->ovc >= 0.001 )
+                if ( tbp[tbp_ij].ovc >= 0.001 )
                 {
                     /* Correction for overcoordination */
                     exp_p1i = EXP( -p_boc1 * Deltap_i );
@@ -450,23 +443,23 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
                     Cf1_ji = 0.0;
                 }
 
-                if ( twbp->v13cor >= 0.001 )
+                if ( tbp[tbp_ij].v13cor >= 0.001 )
                 {
                     /* Correction for 1-3 bond orders */
-                    exp_f4 = EXP( -twbp->p_boc3 * (twbp->p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_i)
-                            + twbp->p_boc5 );
-                    exp_f5 = EXP( -twbp->p_boc3 * (twbp->p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_j)
-                            + twbp->p_boc5 );
+                    exp_f4 = EXP( -tbp[tbp_ij].p_boc3 * (tbp[tbp_ij].p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_i)
+                            + tbp[tbp_ij].p_boc5 );
+                    exp_f5 = EXP( -tbp[tbp_ij].p_boc3 * (tbp[tbp_ij].p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_j)
+                            + tbp[tbp_ij].p_boc5 );
 
                     f4 = 1.0 / (1.0 + exp_f4);
                     f5 = 1.0 / (1.0 + exp_f5);
                     f4f5 = f4 * f5;
 
                     /* Bond Order pages 8-9, derivative of f4 and f5 */
-//                    temp = twbp->p_boc5
-//                        - twbp->p_boc3 * twbp->p_boc4 * SQR( bo_ij->BO );
-//                    u_ij = temp + twbp->p_boc3 * Deltap_boc_i;
-//                    u_ji = temp + twbp->p_boc3 * Deltap_boc_j;
+//                    temp = tbp[tbp_ij].p_boc5
+//                        - tbp[tbp_ij].p_boc3 * tbp[tbp_ij].p_boc4 * SQR( bo_ij->BO );
+//                    u_ij = temp + tbp[tbp_ij].p_boc3 * Deltap_boc_i;
+//                    u_ji = temp + tbp[tbp_ij].p_boc3 * Deltap_boc_j;
 //                    Cf45_ij = Cf45( u_ij, u_ji ) / f4f5;
 //                    Cf45_ji = Cf45( u_ji, u_ij ) / f4f5;
                     Cf45_ij = -f4 * exp_f4;
@@ -483,10 +476,10 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
 
                 /* Bond Order page 10, derivative of total bond order */
                 A0_ij = f1 * f4f5;
-                A1_ij = -2.0 * twbp->p_boc3 * twbp->p_boc4 * bo_ij->BO
+                A1_ij = -2.0 * tbp[tbp_ij].p_boc3 * tbp[tbp_ij].p_boc4 * bo_ij->BO
                     * (Cf45_ij + Cf45_ji);
-                A2_ij = Cf1_ij / f1 + twbp->p_boc3 * Cf45_ij;
-                A2_ji = Cf1_ji / f1 + twbp->p_boc3 * Cf45_ji;
+                A2_ij = Cf1_ij / f1 + tbp[tbp_ij].p_boc3 * Cf45_ij;
+                A2_ji = Cf1_ji / f1 + tbp[tbp_ij].p_boc3 * Cf45_ji;
                 A3_ij = A2_ij + Cf1_ij / f1;
                 A3_ji = A2_ji + Cf1_ji / f1;
 
@@ -531,9 +524,9 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
 
             /* now keeps total_BO */
             total_bond_order_i += bo_ij->BO;
-
-            /* NOTE: handle sym_index later in Hip_Calculate_BO_Part3 */
         }
+
+        /* NOTE: handle sym_index later in k_bond_order_part3 */
     }
 
     __syncthreads( );
@@ -543,13 +536,13 @@ HIP_GLOBAL void k_bond_order_part2( reax_atom *my_atoms, global_parameters gp,
 
 
 /* Main BO calculations */
-HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters gp,
-        single_body_parameters *sbp, two_body_parameters *tbp, 
+HIP_GLOBAL void k_bond_order_part2_opt( reax_atom const * const my_atoms, global_parameters gp,
+        single_body_parameters const * const sbp, two_body_parameters const * const tbp,
         storage workspace, reax_list bond_list, int num_atom_types, int N )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpReduce<double>::TempStorage, temp2)
-    int i, j, pj, type_i, type_j, thread_id, lane_id, itr;;
-    int start_i, end_i;
+    extern __shared__ hipcub::WarpReduce<double>::TempStorage temp2[];
+    int i, j, pj, type_i, type_j, thread_id, warp_id, lane_id, itr;
+    int start_i, end_i, tbp_ij;
     real val_i, Deltap_i, Deltap_boc_i;
     real val_j, Deltap_j, Deltap_boc_j;
     real f1, f2, f3, f4, f5, f4f5, exp_f4, exp_f5;
@@ -559,8 +552,6 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
     real A0_ij, A1_ij, A2_ij, A2_ji, A3_ij, A3_ji;
     real p_boc1, p_boc2;
     real total_bond_order_i;
-    single_body_parameters *sbp_i;
-    two_body_parameters *twbp;
     bond_order_data *bo_ij;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -573,6 +564,7 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
 
     p_boc1 = gp.l[0];
@@ -580,8 +572,7 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
 
     /* Corrected Bond Order calculations */
     type_i = my_atoms[i].type;
-    sbp_i = &sbp[type_i];
-    val_i = sbp_i->valency;
+    val_i = sbp[type_i].valency;
     Deltap_i = workspace.Deltap[i];
     Deltap_boc_i = workspace.Deltap_boc[i];
     start_i = Start_Index( i, &bond_list );
@@ -599,9 +590,9 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
             //if ( i < j || workspace.bond_mark[j] > 3 )
             if ( i < j )
             {
-                twbp = &tbp[ index_tbp(type_i, type_j, num_atom_types) ];
+                tbp_ij = index_tbp(type_i, type_j, num_atom_types);
 
-                if ( twbp->ovc < 0.001 && twbp->v13cor < 0.001 )
+                if ( tbp[tbp_ij].ovc < 0.001 && tbp[tbp_ij].v13cor < 0.001 )
                 {
                     /* There is no correction to bond orders nor to derivatives of
                      * bond order prime! So we leave bond orders unchanged and
@@ -628,7 +619,7 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
                     Deltap_boc_j = workspace.Deltap_boc[j];
 
                     /* on page 1 */
-                    if ( twbp->ovc >= 0.001 )
+                    if ( tbp[tbp_ij].ovc >= 0.001 )
                     {
                         /* Correction for overcoordination */
                         exp_p1i = EXP( -p_boc1 * Deltap_i );
@@ -669,23 +660,23 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
                         Cf1_ji = 0.0;
                     }
 
-                    if ( twbp->v13cor >= 0.001 )
+                    if ( tbp[tbp_ij].v13cor >= 0.001 )
                     {
                         /* Correction for 1-3 bond orders */
-                        exp_f4 = EXP( -twbp->p_boc3 * (twbp->p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_i)
-                                + twbp->p_boc5 );
-                        exp_f5 = EXP( -twbp->p_boc3 * (twbp->p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_j)
-                                + twbp->p_boc5 );
+                        exp_f4 = EXP( -tbp[tbp_ij].p_boc3 * (tbp[tbp_ij].p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_i)
+                                + tbp[tbp_ij].p_boc5 );
+                        exp_f5 = EXP( -tbp[tbp_ij].p_boc3 * (tbp[tbp_ij].p_boc4 * SQR( bo_ij->BO ) - Deltap_boc_j)
+                                + tbp[tbp_ij].p_boc5 );
 
                         f4 = 1.0 / (1.0 + exp_f4);
                         f5 = 1.0 / (1.0 + exp_f5);
                         f4f5 = f4 * f5;
 
                         /* Bond Order pages 8-9, derivative of f4 and f5 */
-//                        temp = twbp->p_boc5
-//                            - twbp->p_boc3 * twbp->p_boc4 * SQR( bo_ij->BO );
-//                        u_ij = temp + twbp->p_boc3 * Deltap_boc_i;
-//                        u_ji = temp + twbp->p_boc3 * Deltap_boc_j;
+//                        temp = tbp[tbp_ij].p_boc5
+//                            - tbp[tbp_ij].p_boc3 * tbp[tbp_ij].p_boc4 * SQR( bo_ij->BO );
+//                        u_ij = temp + tbp[tbp_ij].p_boc3 * Deltap_boc_i;
+//                        u_ji = temp + tbp[tbp_ij].p_boc3 * Deltap_boc_j;
 //                        Cf45_ij = Cf45( u_ij, u_ji ) / f4f5;
 //                        Cf45_ji = Cf45( u_ji, u_ij ) / f4f5;
                         Cf45_ij = -f4 * exp_f4;
@@ -702,10 +693,10 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
 
                     /* Bond Order page 10, derivative of total bond order */
                     A0_ij = f1 * f4f5;
-                    A1_ij = -2.0 * twbp->p_boc3 * twbp->p_boc4 * bo_ij->BO
+                    A1_ij = -2.0 * tbp[tbp_ij].p_boc3 * tbp[tbp_ij].p_boc4 * bo_ij->BO
                         * (Cf45_ij + Cf45_ji);
-                    A2_ij = Cf1_ij / f1 + twbp->p_boc3 * Cf45_ij;
-                    A2_ji = Cf1_ji / f1 + twbp->p_boc3 * Cf45_ji;
+                    A2_ij = Cf1_ij / f1 + tbp[tbp_ij].p_boc3 * Cf45_ij;
+                    A2_ji = Cf1_ji / f1 + tbp[tbp_ij].p_boc3 * Cf45_ji;
                     A3_ij = A2_ij + Cf1_ij / f1;
                     A3_ji = A2_ji + Cf1_ji / f1;
 
@@ -750,15 +741,15 @@ HIP_GLOBAL void k_bond_order_part2_opt( reax_atom *my_atoms, global_parameters g
 
                 /* now keeps total_BO */
                 total_bond_order_i += bo_ij->BO;
-
-                /* NOTE: handle sym_index later in Hip_Calculate_BO_Part3 */
             }
+
+            /* NOTE: handle sym_index later in k_bond_order_part3 */
         }
 
         pj += warpSize;
     }
 
-    total_bond_order_i = hipcub::WarpReduce<double>(temp2[i % (blockDim.x / warpSize)]).Sum(total_bond_order_i);
+    total_bond_order_i = hipcub::WarpReduce<double>(temp2[warp_id]).Sum(total_bond_order_i);
 
     if ( lane_id == 0 )
     {
@@ -788,7 +779,7 @@ HIP_GLOBAL void k_bond_order_part3( storage workspace, reax_list bond_list, int 
         j = bond_list.bond_list[pj].nbr;
         bo_ij = &bond_list.bond_list[pj].bo_data;
 
-        //if ( i >= j || workspace.bond_mark[i] <= 3 )
+        //if ( i >= j && workspace.bond_mark[i] <= 3 )
         if ( i >= j )
         {
             /* We only need to update bond orders from bo_ji
@@ -809,13 +800,12 @@ HIP_GLOBAL void k_bond_order_part3( storage workspace, reax_list bond_list, int 
 
 
 /* Calculate helper variables */
-HIP_GLOBAL void k_bond_order_part4( reax_atom *my_atoms,
-        global_parameters gp, single_body_parameters *sbp,
+HIP_GLOBAL void k_bond_order_part4( reax_atom const * const my_atoms,
+        global_parameters gp, single_body_parameters const * const sbp,
         storage workspace, int N )
 {
     int i, type_i;
     real explp1, p_lp1;
-    single_body_parameters *sbp_i;
 
     i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -829,18 +819,17 @@ HIP_GLOBAL void k_bond_order_part4( reax_atom *my_atoms,
     /* Calculate some helper variables that are  used at many places
      * throughout force calculations */
     type_i = my_atoms[i].type;
-    sbp_i = &sbp[ type_i ];
 
-    workspace.Delta[i] = workspace.total_bond_order[i] - sbp_i->valency;
-    workspace.Delta_e[i] = workspace.total_bond_order[i] - sbp_i->valency_e;
+    workspace.Delta[i] = workspace.total_bond_order[i] - sbp[type_i].valency;
+    workspace.Delta_e[i] = workspace.total_bond_order[i] - sbp[type_i].valency_e;
     workspace.Delta_boc[i] = workspace.total_bond_order[i]
-        - sbp_i->valency_boc;
+        - sbp[type_i].valency_boc;
 
     workspace.vlpex[i] = workspace.Delta_e[i]
         - 2.0 * (int)(workspace.Delta_e[i] / 2.0);
     explp1 = EXP(-p_lp1 * SQR(2.0 + workspace.vlpex[i]));
     workspace.nlp[i] = explp1 - (int)(workspace.Delta_e[i] / 2.0);
-    workspace.Delta_lp[i] = sbp_i->nlp_opt - workspace.nlp[i];
+    workspace.Delta_lp[i] = sbp[type_i].nlp_opt - workspace.nlp[i];
     workspace.Clp[i] = 2.0 * p_lp1 * explp1 * (2.0 + workspace.vlpex[i]);
     /* Adri uses different dDelta_lp values than the ones in notes... */
     workspace.dDelta_lp[i] = workspace.Clp[i];
@@ -848,16 +837,16 @@ HIP_GLOBAL void k_bond_order_part4( reax_atom *my_atoms,
 //        * ((FABS(workspace.Delta_e[i] / 2.0
 //                        - (int)(workspace.Delta_e[i] / 2.0)) < 0.1) ? 1 : 0 );
 
-    if ( sbp_i->mass > 21.0 )
+    if ( sbp[type_i].mass > 21.0 )
     {
-        workspace.nlp_temp[i] = 0.5 * (sbp_i->valency_e - sbp_i->valency);
-        workspace.Delta_lp_temp[i] = sbp_i->nlp_opt - workspace.nlp_temp[i];
+        workspace.nlp_temp[i] = 0.5 * (sbp[type_i].valency_e - sbp[type_i].valency);
+        workspace.Delta_lp_temp[i] = sbp[type_i].nlp_opt - workspace.nlp_temp[i];
         workspace.dDelta_lp_temp[i] = 0.0;
     }
     else
     {
         workspace.nlp_temp[i] = workspace.nlp[i];
-        workspace.Delta_lp_temp[i] = sbp_i->nlp_opt - workspace.nlp_temp[i];
+        workspace.Delta_lp_temp[i] = sbp[type_i].nlp_opt - workspace.nlp_temp[i];
         workspace.dDelta_lp_temp[i] = workspace.Clp[i];
     }
 }
@@ -886,7 +875,7 @@ HIP_GLOBAL void k_total_forces_part1( storage workspace, reax_list bond_list,
         }
     }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     rvec_Add( workspace->f[i], f_i );
 #else
     atomic_rvecAdd( workspace.f[i], f_i );
@@ -897,8 +886,8 @@ HIP_GLOBAL void k_total_forces_part1( storage workspace, reax_list bond_list,
 HIP_GLOBAL void k_total_forces_part1_opt( storage workspace, reax_list bond_list,
         int N )
 {
-    HIP_DYNAMIC_SHARED( hipcub::WarpReduce<double>::TempStorage, temp1)
-    int i, pj, start_i, end_i, thread_id, lane_id, itr;
+    extern __shared__ hipcub::WarpReduce<double>::TempStorage temp1[];
+    int i, pj, start_i, end_i, thread_id, warp_id, lane_id, itr;
     rvec f_i;
 
     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -911,6 +900,7 @@ HIP_GLOBAL void k_total_forces_part1_opt( storage workspace, reax_list bond_list
         return;
     }
 
+    warp_id = threadIdx.x / warpSize;
     lane_id = thread_id % warpSize;
     start_i = Start_Index( i, &bond_list );
     end_i = End_Index( i, &bond_list );
@@ -926,13 +916,13 @@ HIP_GLOBAL void k_total_forces_part1_opt( storage workspace, reax_list bond_list
         pj += warpSize;
     }
 
-    f_i[0] = hipcub::WarpReduce<double>(temp1[i % (blockDim.x / warpSize)]).Sum(f_i[0]);
-    f_i[1] = hipcub::WarpReduce<double>(temp1[i % (blockDim.x / warpSize)]).Sum(f_i[1]);
-    f_i[2] = hipcub::WarpReduce<double>(temp1[i % (blockDim.x / warpSize)]).Sum(f_i[2]);
+    f_i[0] = hipcub::WarpReduce<double>(temp1[warp_id]).Sum(f_i[0]);
+    f_i[1] = hipcub::WarpReduce<double>(temp1[warp_id]).Sum(f_i[1]);
+    f_i[2] = hipcub::WarpReduce<double>(temp1[warp_id]).Sum(f_i[2]);
 
     if ( lane_id == 0 )
     {
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
         rvec_Add( workspace->f[i], f_i );
 #else
         atomic_rvecAdd( workspace.f[i], f_i );
@@ -941,9 +931,8 @@ HIP_GLOBAL void k_total_forces_part1_opt( storage workspace, reax_list bond_list
 }
 
 
-HIP_GLOBAL void k_total_forces_virial_part1( storage workspace,
-        reax_list bond_list, simulation_data *data,
-        rvec *data_ext_press, int N )
+HIP_GLOBAL void k_total_forces_virial_part1( storage workspace, reax_list bond_list,
+        rvec * const data_ext_press, int N )
 {
     int i, pj;
 
@@ -958,16 +947,15 @@ HIP_GLOBAL void k_total_forces_virial_part1( storage workspace,
     {
         if ( i < bond_list.bond_list[pj].nbr )
         {
-            Hip_Add_dBond_to_Forces_NPT( i, pj, data, &workspace, &bond_list,
+            Hip_Add_dBond_to_Forces_NPT( i, pj, &workspace, &bond_list,
                     data_ext_press[i] );
         }
     }
 }
 
 
-#if !defined(CUDA_ACCUM_ATOMIC)
-HIP_GLOBAL void k_total_forces_part1_2( reax_atom *my_atoms, reax_list bond_list,
-        storage workspace, int N )
+#if !defined(HIP_ACCUM_ATOMIC)
+HIP_GLOBAL void k_total_forces_part1_2( reax_list bond_list, storage workspace, int N )
 {
     int i, pk;
     bond_data *nbr_k, *nbr_k_sym;
@@ -990,7 +978,7 @@ HIP_GLOBAL void k_total_forces_part1_2( reax_atom *my_atoms, reax_list bond_list
 #endif
 
 
-HIP_GLOBAL void k_total_forces_part2( reax_atom *my_atoms, int n,
+HIP_GLOBAL void k_total_forces_part2( reax_atom * const my_atoms, int n,
         storage workspace )
 {
     int i;
@@ -1006,13 +994,18 @@ HIP_GLOBAL void k_total_forces_part2( reax_atom *my_atoms, int n,
 }
 
 
-void Hip_Compute_Bond_Orders( reax_system *system, control_params *control,
-        simulation_data *data, storage *workspace, 
-        reax_list **lists, output_controls *out_control )
+void Hip_Compute_Bond_Orders( reax_system const * const system,
+        control_params const * const control, simulation_data * const data,
+        storage * const workspace, reax_list ** const lists,
+        output_controls const * const out_control )
 {
     int blocks;
 
-    hipLaunchKernelGGL(k_bond_order_part1, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  system->d_my_atoms, system->reax_param.d_sbp, 
+    hipStreamWaitEvent( control->streams[0], control->stream_events[1], 0 );
+
+    k_bond_order_part1 <<< control->blocks_n, control->block_size_n, 0,
+                       control->streams[0] >>>
+        ( system->d_my_atoms, system->reax_param.d_sbp,
           *(workspace->d_workspace), system->N );
     hipCheckError( );
 
@@ -1025,87 +1018,109 @@ void Hip_Compute_Bond_Orders( reax_system *system, control_params *control,
     blocks = system->N * warpSize / DEF_BLOCK_SIZE
         + (system->N * warpSize % DEF_BLOCK_SIZE == 0 ? 0 : 1);
 
-    hipLaunchKernelGGL(k_bond_order_part2, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpReduce<double>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  system->d_my_atoms, system->reax_param.d_gp, system->reax_param.d_sbp,
+    k_bond_order_part2 <<< blocks, DEF_BLOCK_SIZE,
+                       sizeof(hipcub::WarpReduce<double>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                       control->streams[0] >>>
+        ( system->d_my_atoms, system->reax_param.d_gp, system->reax_param.d_sbp,
           system->reax_param.d_tbp, *(workspace->d_workspace), 
           *(lists[BONDS]), system->reax_param.num_atom_types, system->N );
     hipCheckError( );
 
-    hipLaunchKernelGGL(k_bond_order_part3, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  *(workspace->d_workspace), *(lists[BONDS]), system->N );
+    k_bond_order_part3 <<< control->blocks_n, control->block_size_n, 0,
+                       control->streams[0] >>>
+        ( *(workspace->d_workspace), *(lists[BONDS]), system->N );
     hipCheckError( );
 
-    hipLaunchKernelGGL(k_bond_order_part4, dim3(control->blocks_n), dim3(control->block_size_n ), 0, 0,  system->d_my_atoms, system->reax_param.d_gp, system->reax_param.d_sbp, 
+    k_bond_order_part4 <<< control->blocks_n, control->block_size_n, 0,
+                       control->streams[0]>>>
+        ( system->d_my_atoms, system->reax_param.d_gp, system->reax_param.d_sbp,
          *(workspace->d_workspace), system->N );
     hipCheckError( );
+
+    hipEventRecord( control->stream_events[2], control->streams[0] );
 }
 
 
-void Hip_Total_Forces_Part1( reax_system *system, control_params *control,
-        simulation_data *data, storage *workspace, reax_list **lists )
+void Hip_Total_Forces_Part1( reax_system const * const system,
+        control_params const * const control, simulation_data * const data,
+        storage * const workspace, reax_list ** const lists )
 {
     int blocks;
     rvec *spad_rvec;
 
     if ( control->virial == 0 )
     {
-//        blocks = system->N / DEF_BLOCK_SIZE
-//            + ((system->N % DEF_BLOCK_SIZE == 0) ? 0 : 1);
-//
-//        k_total_forces_part1 <<< blocks, DEF_BLOCK_SIZE >>>
+//        k_total_forces_part1 <<< control->blocks_n, control->block_size_n, 0,
+//                             control->streams[0] >>>
 //            ( *(workspace->d_workspace), *(lists[BONDS]), system->N );
 //        hipCheckError( );
 
         blocks = system->N * warpSize / DEF_BLOCK_SIZE
             + ((system->N * warpSize % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-        hipLaunchKernelGGL(k_total_forces_part1_opt, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(hipcub::WarpReduce<double>::TempStorage) * (DEF_BLOCK_SIZE / warpSize) , 0,  *(workspace->d_workspace), *(lists[BONDS]), system->N );
+        k_total_forces_part1_opt <<< blocks, DEF_BLOCK_SIZE,
+                                 sizeof(hipcub::WarpReduce<double>::TempStorage) * (DEF_BLOCK_SIZE / warpSize),
+                                 control->streams[0] >>>
+            ( *(workspace->d_workspace), *(lists[BONDS]), system->N );
         hipCheckError( );
     }
     else
     {
-        hip_check_malloc( &workspace->scratch, &workspace->scratch_size,
-                sizeof(rvec) * 2 * system->N,
-                "Hip_Total_Forces_Part1::workspace->scratch" );
-        spad_rvec = (rvec *) workspace->scratch;
-        hip_memset( spad_rvec, 0, sizeof(rvec) * 2 * system->N,
-                "total_forces:ext_press" );
+        sHipCheckMalloc( &workspace->scratch[0], &workspace->scratch_size[0],
+                sizeof(rvec) * 2 * system->N, __FILE__, __LINE__ );
+        spad_rvec = (rvec *) workspace->scratch[0];
+        sHipMemsetAsync( spad_rvec, 0, sizeof(rvec) * 2 * system->N,
+                control->streams[0], __FILE__, __LINE__ );
+        hipStreamSynchronize( control->streams[0] );
 
         blocks = system->N / DEF_BLOCK_SIZE
             + ((system->N % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-        hipLaunchKernelGGL(k_total_forces_virial_part1, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  *(workspace->d_workspace), *(lists[BONDS]), 
-              (simulation_data *)data->d_simulation_data, 
-              spad_rvec, system->N );
+        k_total_forces_virial_part1 <<< blocks, DEF_BLOCK_SIZE, 0,
+                                    control->streams[0] >>>
+            ( *(workspace->d_workspace), *(lists[BONDS]), spad_rvec, system->N );
         hipCheckError( );
 
         blocks = system->N / DEF_BLOCK_SIZE
             + ((system->N % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
         /* reduction for ext_press */
-        hipLaunchKernelGGL(k_reduction_rvec, dim3(blocks), dim3(DEF_BLOCK_SIZE), sizeof(rvec) * (DEF_BLOCK_SIZE / warpSize) , 0,  spad_rvec, &spad_rvec[system->N], system->N );
-        hipCheckError( );
+        k_reduction_rvec <<< blocks, DEF_BLOCK_SIZE,
+                         sizeof(rvec) * (DEF_BLOCK_SIZE / warpSize),
+                         control->streams[0] >>>
+            ( spad_rvec, &spad_rvec[system->N], system->N );
+        hipCheckError( ); 
 
-        hipLaunchKernelGGL(k_reduction_rvec, dim3(1), dim3(((blocks + warpSize - 1) / warpSize) * warpSize), sizeof(rvec) * ((blocks + warpSize - 1) / warpSize) , 0,  &spad_rvec[system->N], &((simulation_data *)data->d_simulation_data)->my_ext_press, blocks );
-        hipCheckError( );
+        k_reduction_rvec <<< 1, ((blocks + warpSize - 1) / warpSize) * warpSize,
+                         sizeof(rvec) * ((blocks + warpSize - 1) / warpSize),
+                         control->streams[0] >>>
+            ( &spad_rvec[system->N],
+              &((simulation_data *)data->d_simulation_data)->my_ext_press, blocks );
+        hipCheckError( ); 
     }
 
-#if !defined(CUDA_ACCUM_ATOMIC)
+#if !defined(HIP_ACCUM_ATOMIC)
     blocks = system->N / DEF_BLOCK_SIZE
         + ((system->N % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
     /* post processing for the atomic forces */
-    hipLaunchKernelGGL(k_total_forces_part1_2, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, *(lists[BONDS]), *(workspace->d_workspace), system->N );
-    hipCheckError( );
+    k_total_forces_part1_2 <<< blocks, DEF_BLOCK_SIZE, 0,
+                            control->streams[0] >>>
+        ( *(lists[BONDS]), *(workspace->d_workspace), system->N );
+    hipCheckError( ); 
 #endif
 }
 
 
-void Hip_Total_Forces_Part2( reax_system *system, storage *workspace )
+void Hip_Total_Forces_Part2( reax_system * const system,
+        control_params const * const control, storage * const workspace )
 {
     int blocks;
 
     blocks = system->n / DEF_BLOCK_SIZE
         + ((system->n % DEF_BLOCK_SIZE == 0) ? 0 : 1);
 
-    hipLaunchKernelGGL(k_total_forces_part2, dim3(blocks), dim3(DEF_BLOCK_SIZE ), 0, 0,  system->d_my_atoms, system->n, *(workspace->d_workspace) );
-    hipCheckError( );
+    k_total_forces_part2 <<< blocks, DEF_BLOCK_SIZE, 0, control->streams[0] >>>
+        ( system->d_my_atoms, system->n, *(workspace->d_workspace) );
+    hipCheckError( ); 
 }

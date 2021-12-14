@@ -64,9 +64,7 @@ namespace LAMMPS_NS {
 		void min_setup_pre_force(int);
 		void min_pre_force(int);
 
-		int matvecs;
-		double qeq_time;
-		fix_qeq_gpu *qeq_gpu;
+//		fix_qeq_gpu *qeq_gpu;
 
 	protected:
 		int nevery, reaxflag;
@@ -78,33 +76,16 @@ namespace LAMMPS_NS {
 		class PairReaxFFHIP *reaxc;
 
 		double swa, swb;      // lower/upper Taper cutoff radius
-		double Tap[8];        // Taper function
 		double tolerance;     // tolerance for the norm of the rel residual in CG
 
-		double *chi,*eta,*gamma;  // qeq parameters
-		double **shld;
 
 		bigint ngroup;
 
 		// fictitious charges
 
-		double *s, *t;
 		double **s_hist, **t_hist;
 		int nprev;
 
-		sparse_matrix H;
-		double *Hdia_inv;
-		double *b_s, *b_t;
-		double *b_prc, *b_prm;
-
-		//CG storage
-		double *p, *q, *r, *d;
-
-		//GMRES storage
-		//double *g,*y;
-		//double **v;
-		//double **h;
-		//double *hc, *hs;
 
 		char *pertype_option;  // argument to determine how per-type info is obtained
 		virtual void pertype_parameters(char*);
@@ -125,7 +106,7 @@ namespace LAMMPS_NS {
 
 		//int GMRES(double*,double*);
 		virtual void hip_sparse_matvec(double *,double*);
-        virtual void compute_H();
+    virtual void compute_H();
 
 		virtual int pack_forward_comm(int, int *, double *, int, int *);
 		virtual void unpack_forward_comm(int, int, double *);

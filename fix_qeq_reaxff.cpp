@@ -46,50 +46,17 @@
 #include "reaxff_vector.h"
 #include "reaxff_types.h"
 #include "reaxff_list.h"
+#include "reaxff_hip_charges.h"
 
 #include "reaxff_hip_forces.h"
 #include "reaxff_hip_list.h"
-//extern "C" void  HipAllocateStorageForFixQeq(int nmax, int dual_enabled, fix_qeq_gpu *qeq_gpu);
-//extern "C" void  HipInitStorageForFixQeq(fix_qeq_gpu *qeq_gpu,double *Hdia_inv, double *b_s,double *b_t,double *b_prc,double *b_prm,double *s,double *t, int NN);
-//extern "C" void  Hip_Calculate_H_Matrix(reax_list **gpu_lists,  reax_system *system,fix_qeq_gpu *qeq_gpu, control_params *control, int inum, int SMALL);
-//extern "C" void  Hip_Init_Taper(fix_qeq_gpu *qeq_gpu, double *Tap, int numTap);
-//extern "C" void  Hip_Allocate_Matrix( sparse_matrix *, int, int );
-//extern "C" void  Hip_Init_Sparse_Matrix_Indices( reax_system *system,fix_qeq_gpu *qeq_gpu, int n);
-//extern "C" void  Hip_Init_Fix_Atoms(reax_system *system,fix_qeq_gpu *qeq_gpu);
-//extern "C" void  Hip_Init_Matvec_Fix(int nn, fix_qeq_gpu *qeq_gpu, reax_system *system);
-//extern "C" void  Hip_Copy_Pertype_Parameters_To_Device(double *chi,double *eta,double *gamma,int ntypes,fix_qeq_gpu *qeq_gpu);
-//extern "C" void Hip_Copy_From_Device_Comm_Fix(double *buf, double *x, int n, int offset);
-//extern "C" void  Hip_Copy_To_Device_Comm_Fix(double *buf,double *x,int n,int offset);
-//extern "C" void  Hip_Sparse_Matvec_Compute(sparse_matrix *H,double *x, double *q, double *eta, reax_atom *d_fix_my_atoms, int nn, int NN);
-//extern "C" void  Hip_Vector_Sum_Fix( real *res, real a, real *x, real b, real *y, int count);
-//extern "C" void  Hip_CG_Preconditioner_Fix( real *, real *, real *, int );
-//extern "C" void  Hip_Copy_Vector_From_Device(real *host_vector, real *device_vector, int nn);
-//extern "C" float  Hip_Calculate_Local_S_Sum(int nn,fix_qeq_gpu *qeq_gpu);
-//extern "C" float  Hip_Calculate_Local_T_Sum(int nn,fix_qeq_gpu *qeq_gpu);
-//extern "C" void  Hip_UpdateQ_And_Copy_To_Device_Comm_Fix(double *buf,fix_qeq_gpu *qeq_gpu,int n);
-//extern "C" void Hip_Estimate_CMEntries_Storages( reax_system *system, control_params *control, reax_list **lists, fix_qeq_gpu *qeq_gpu,int nn);
-//extern "C" void  Hip_Update_Q_And_Backup_ST(int nn, fix_qeq_gpu *qeq_gpu, double u, reax_system *system);
-//extern "C" void  HipFreeFixQeqParams(fix_qeq_gpu *qeq_gpu);
-//extern "C" void  HipFreeHMatrix(fix_qeq_gpu *qeq_gpu);
-//extern "C" void  Hip_Allocate_Hist_ST(fix_qeq_gpu *qeq_gpu,int nmax);
-//extern "C" void  Hip_Copy_Vector_To_Device(real *host_vector, real *device_vector, int nn);
-//extern "C" void Hip_Free_Memory(fix_qeq_gpu *qeq_gpu);
-//extern "C" void Hip_Write_Reax_Lists(reax_system *system, reax_list**, reax_list*);
-//
-//extern "C" void Hip_Adjust_End_Index_Before_ReAllocation(int oldN, int systemN, reax_list **gpu_lists);
-//extern "C"  void Hip_ReAllocate( reax_system *system, control_params *control,
-//		simulation_data *data, storage *workspace, reax_list **lists);
 
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define EV_TO_KCAL_PER_MOL 14.4
-//#define DANGER_ZONE     0.95
-//#define LOOSE_ZONE      0.7
 #define SQR(x) ((x)*(x))
 #define CUBE(x) ((x)*(x)*(x))
-//#define MIN_NBRS 100
 
 static const char cite_fix_qeq_reax[] =
 		"fix qeq/reax command:\n\n"
@@ -109,14 +76,14 @@ FixQEqReax::FixQEqReax(LAMMPS *lmp, int narg, char **arg) :
 {
 	if (lmp->citeme) lmp->citeme->add(cite_fix_qeq_reax);
 
-	if (narg<8 || narg>9) error->all(FLERR,"Illegal fix qeq/reax command");
+	if (narg < 8 || narg > 9) error->all(FLERR,"Illegal fix qeq/reax command");
 
-	nevery = utils::inumeric(FLERR,arg[3],false,lmp);
+	nevery = utils::inumeric(FLERR,arg[3],false, lmp);
 	if (nevery <= 0) error->all(FLERR,"Illegal fix qeq/reax command");
 
-	swa = utils::numeric(FLERR,arg[4],false,lmp);
-	swb = utils::numeric(FLERR,arg[5],false,lmp);
-	tolerance = utils::numeric(FLERR,arg[6],false,lmp);
+	swa = utils::numeric(FLERR,arg[4],false, lmp);
+	swb = utils::numeric(FLERR,arg[5],false, lmp);
+	tolerance = utils::numeric(FLERR,arg[6],false, lmp);
 	int len = strlen(arg[7]) + 1;
 	pertype_option = new char[len];
 	strcpy(pertype_option,arg[7]);
@@ -128,43 +95,19 @@ FixQEqReax::FixQEqReax(LAMMPS *lmp, int narg, char **arg) :
 		if (strcmp(arg[8],"dual") == 0) dual_enabled = 1;
 		else error->all(FLERR,"Illegal fix qeq/reax command");
 	}
-//	shld = NULL;
 
 	n = n_cap = 0;
 	N = nmax = 0;
 	m_fill = m_cap = 0;
 	pack_flag = 0;
-	s = NULL;
-	t = NULL;
 	nprev = 4;
 
-	Hdia_inv = NULL;
-	b_s = NULL;
-	b_t = NULL;
-	b_prc = NULL;
-	b_prm = NULL;
-
-	// CG
-	p = NULL;
-	q = NULL;
-	r = NULL;
-	d = NULL;
-
-//	// H matrix
-//	H.firstnbr = NULL;
-//	H.numnbrs = NULL;
-//	H.jlist = NULL;
-//	H.val = NULL;
-
-	// dual CG support
 	// Update comm sizes for this fix
 	if (dual_enabled) comm_forward = comm_reverse = 2;
 	else comm_forward = comm_reverse = 1;
 
 	// perform initial allocation of atom-based arrays
 	// register with Atom class
-
-	reaxc = NULL;
 	reaxc = (PairReaxFFHIP *) force->pair_match("^reax/f/hip", 0);
 
 	s_hist = t_hist = NULL;
@@ -173,13 +116,6 @@ FixQEqReax::FixQEqReax(LAMMPS *lmp, int narg, char **arg) :
 	for (int i = 0; i < atom->nmax; i++)
 		for (int j = 0; j < nprev; ++j)
 			s_hist[i][j] = t_hist[i][j] = 0;
-
-
-	//Initialize Qeq gpu struct
-	qeq_gpu = (fix_qeq_gpu *)memory->smalloc(sizeof(fix_qeq_gpu),"reax:storage");
-	Hip_Allocate_Hist_ST(qeq_gpu, atom->nmax);
-
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -191,22 +127,12 @@ FixQEqReax::~FixQEqReax()
 	delete[] pertype_option;
 
 	// unregister callbacks to this fix from Atom class
-
-	atom->delete_callback(id,0);
+	atom->delete_callback(id, 0);
 
 	memory->destroy(s_hist);
 	memory->destroy(t_hist);
-
 	deallocate_storage();
 	deallocate_matrix();
-
-//	memory->destroy(shld);
-
-	if (!reaxflag) {
-		memory->destroy(chi);
-		memory->destroy(eta);
-		memory->destroy(gamma);
-	}
 }
 
 /* ---------------------------------------------------------------------- */
@@ -234,20 +160,22 @@ int FixQEqReax::setmask()
 
 void FixQEqReax::pertype_parameters(char *arg)
 {
-	if (strcmp(arg,"reax/f/hip") == 0) {
+  //TODO: Check if extraction of chi, eta and gamma are needed.
+  //TODO: Check if map in Pair can be eliminated by using system->my_atom[i].type instead
+	if (strcmp(arg, "reax/f/hip") == 0) {
 		reaxflag = 1;
-		Pair *pair = force->pair_match("reax/f/hip",0);
-		if (pair == NULL) error->all(FLERR,"No pair reax/f/hip for fix qeq/reax");
+		Pair *pair = force->pair_match("reax/f/hip", 0);
+		if (pair == nullptr)
+		  error->all(FLERR,"No pair reax/f/hip for fix qeq/reax");
 
 		int tmp;
-		chi = (double *) pair->extract("chi",tmp);
-		eta = (double *) pair->extract("eta",tmp);
-		gamma = (double *) pair->extract("gamma",tmp);
-		if (chi == NULL || eta == NULL || gamma == NULL)
-			error->all(FLERR,
-					"Fix qeq/reax could not extract params from pair reax/f/hip");
-
-		Hip_Copy_Pertype_Parameters_To_Device(chi,eta,gamma,atom->ntypes,qeq_gpu);
+		auto chi = (double *) pair->extract("chi", tmp);
+		auto eta = (double *) pair->extract("eta", tmp);
+		auto gamma = (double *) pair->extract("gamma",tmp);
+		if (chi == nullptr || eta == nullptr || gamma == nullptr)
+			error->all(FLERR, "Fix qeq/reax could not extract params from pair reax/f/hip");
+// Removed the copy since it should be allocated already by the Pair class on the GPU
+//		Hip_Copy_Pertype_Parameters_To_Device(chi, eta, gamma, atom->ntypes, qeq_gpu);
 		return;
 	}
 
@@ -261,47 +189,47 @@ void FixQEqReax::allocate_storage()
 {
 	nmax = atom->nmax;
 
-	memory->create(s,nmax,"qeq:s");
-	memory->create(t,nmax,"qeq:t");
-
-	memory->create(Hdia_inv,nmax,"qeq:Hdia_inv");
-	memory->create(b_s,nmax,"qeq:b_s");
-	memory->create(b_t,nmax,"qeq:b_t");
-	memory->create(b_prc,nmax,"qeq:b_prc");
-	memory->create(b_prm,nmax,"qeq:b_prm");
+//	memory->create(s, nmax,"qeq:s");
+//	memory->create(t, nmax,"qeq:t");
+//
+//	memory->create(Hdia_inv,nmax,"qeq:Hdia_inv");
+//	memory->create(b_s,nmax,"qeq:b_s");
+//	memory->create(b_t,nmax,"qeq:b_t");
+//	memory->create(b_prc,nmax,"qeq:b_prc");
+//	memory->create(b_prm,nmax,"qeq:b_prm");
 
 	// dual CG support
 	int size = nmax;
 	if (dual_enabled) size*= 2;
 
-
-	memory->create(p,size,"qeq:p");
-	memory->create(q,size,"qeq:q");
-	memory->create(r,size,"qeq:r");
-	memory->create(d,size,"qeq:d");
-
-	HipAllocateStorageForFixQeq(nmax, dual_enabled, qeq_gpu);
+//
+//	memory->create(p,size,"qeq:p");
+//	memory->create(q,size,"qeq:q");
+//	memory->create(r,size,"qeq:r");
+//	memory->create(d,size,"qeq:d");
+//
+//	HipAllocateStorageForFixQeq(nmax, dual_enabled, qeq_gpu);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixQEqReax::deallocate_storage()
 {
-	memory->destroy(s);
-	memory->destroy(t);
-
-	memory->destroy( Hdia_inv );
-	memory->destroy( b_s );
-	memory->destroy( b_t );
-	memory->destroy( b_prc );
-	memory->destroy( b_prm );
-
-	memory->destroy( p );
-	memory->destroy( q );
-	memory->destroy( r );
-	memory->destroy( d );
-
-	HipFreeFixQeqParams(qeq_gpu);
+//	memory->destroy(s);
+//	memory->destroy(t);
+//
+//	memory->destroy( Hdia_inv );
+//	memory->destroy( b_s );
+//	memory->destroy( b_t );
+//	memory->destroy( b_prc );
+//	memory->destroy( b_prm );
+//
+//	memory->destroy( p );
+//	memory->destroy( q );
+//	memory->destroy( r );
+//	memory->destroy( d );
+//
+//	HipFreeFixQeqParams(qeq_gpu);
 
 }
 
@@ -318,22 +246,22 @@ void FixQEqReax::reallocate_storage()
 
 void FixQEqReax::allocate_matrix()
 {
-	int i,ii,inum,m;
+  //TODO: Check if this is necessary now. The H matrix, now located in workspace->d_workspace->H, gets allocated
+  // when the puremd_handle constructor is called. If changes are necessary, it should be done in the function
+  // Hip_Init_Lists. For now, the allocation is removed from here
+	int i, ii, inum, m;
 	int *ilist, *numneigh;
 
 	int mincap;
 	double safezone;
 
-	if (reaxflag) {
-		mincap = reaxc->system->mincap;
-		safezone = reaxc->system->safezone;
-	} else {
-		printf("Error at line %d at %s \n. Only REAX supported \n", __LINE__,__FILE__);
+	if (!reaxflag) {
+		printf("Error at line %d at %s \n. Only REAX supported \n", __LINE__, __FILE__);
 		exit(EXIT_FAILURE);
 	}
 
 	n = atom->nlocal;
-	n_cap = MAX( (int)(n * safezone), mincap);
+	n_cap = MAX( (int)(n * SAFER_ZONE), MIN_CAP);
 
 	// determine the total space for the H matrix
 
@@ -353,18 +281,18 @@ void FixQEqReax::allocate_matrix()
 	}
 	m_cap = MAX( (int)(m * safezone), mincap * MIN_NBRS);
 
-	H.n = n_cap;
-	H.m = m_cap;
-
-	H.allocated = TRUE;
-	H.n = n_cap;
-	H.n_max = n_cap;
-	H.m = m_cap;
-	H.format = 0;
-	memory->create(H.start, n_cap,"qeq:H.start");
-	memory->create(H.end, n_cap,"qeq:H.end");
-	memory->create(H.j,m_cap, "qeq:H.j");
-	memory->create(H.val, m_cap, "qeq:H.val");
+//	H.n = n_cap;
+//	H.m = m_cap;
+//
+//	H.allocated = TRUE;
+//	H.n = n_cap;
+//	H.n_max = n_cap;
+//	H.m = m_cap;
+//	H.format = 0;
+//	memory->create(H.start, n_cap,"qeq:H.start");
+//	memory->create(H.end, n_cap,"qeq:H.end");
+//	memory->create(H.j,m_cap, "qeq:H.j");
+//	memory->create(H.val, m_cap, "qeq:H.val");
 
 }
 
@@ -372,18 +300,21 @@ void FixQEqReax::allocate_matrix()
 
 void FixQEqReax::deallocate_matrix()
 {
-    memory->destroy(H.start);
-    memory->destroy(H.end);
-    memory->destroy(H.j);
-    memory->destroy(H.val);
-
-	HipFreeHMatrix(qeq_gpu);
+  //TODO: Check if necessary, the puremd_handle destructor should take care of this
+//    memory->destroy(H.start);
+//    memory->destroy(H.end);
+//    memory->destroy(H.j);
+//    memory->destroy(H.val);
+//
+//	HipFreeHMatrix(qeq_gpu);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixQEqReax::reallocate_matrix()
 {
+  //TODO: check if necessary. This should be taken care of by Hip_Reallocate_Part2. If more granularity required,
+  // it can be its separate function in reaxff_hip_allocate.cu
 	deallocate_matrix();
 	allocate_matrix();
 }
@@ -450,34 +381,37 @@ void FixQEqReax::init_shielding()
 
 void FixQEqReax::init_taper()
 {
-	double d7, swa2, swa3, swb2, swb3;
+  //TODO: Commented out for now, this should be taken care of by Init_Taper in init_md, which gets called by
+  // Hip_Init_Workspace. The error checking is also present
 
-	if (fabs(swa) > 0.01 && comm->me == 0)
-		error->warning(FLERR,"Fix qeq/reax has non-zero lower Taper radius cutoff");
-	if (swb < 0)
-		error->all(FLERR, "Fix qeq/reax has negative upper Taper radius cutoff");
-	else if (swb < 5 && comm->me == 0)
-		error->warning(FLERR,"Fix qeq/reax has very low Taper radius cutoff");
-
-	d7 = pow( swb - swa, 7);
-	swa2 = SQR( swa);
-	swa3 = CUBE( swa);
-	swb2 = SQR( swb);
-	swb3 = CUBE( swb);
-
-
-	Tap[7] =  20.0 / d7;
-	Tap[6] = -70.0 * (swa + swb) / d7;
-	Tap[5] =  84.0 * (swa2 + 3.0*swa*swb + swb2) / d7;
-	Tap[4] = -35.0 * (swa3 + 9.0*swa2*swb + 9.0*swa*swb2 + swb3) / d7;
-	Tap[3] = 140.0 * (swa3*swb + 3.0*swa2*swb2 + swa*swb3) / d7;
-	Tap[2] =-210.0 * (swa3*swb2 + swa2*swb3) / d7;
-	Tap[1] = 140.0 * swa3 * swb3 / d7;
-	Tap[0] = (-35.0*swa3*swb2*swb2 + 21.0*swa2*swb3*swb2 -
-			7.0*swa*swb3*swb3 + swb3*swb3*swb) / d7;
-
-
-	Hip_Init_Taper(qeq_gpu,Tap,8);
+//	double d7, swa2, swa3, swb2, swb3;
+//
+//	if (fabs(swa) > 0.01 && comm->me == 0)
+//		error->warning(FLERR,"Fix qeq/reax has non-zero lower Taper radius cutoff");
+//	if (swb < 0)
+//		error->all(FLERR, "Fix qeq/reax has negative upper Taper radius cutoff");
+//	else if (swb < 5 && comm->me == 0)
+//		error->warning(FLERR,"Fix qeq/reax has very low Taper radius cutoff");
+//
+//	d7 = pow( swb - swa, 7);
+//	swa2 = SQR( swa);
+//	swa3 = CUBE( swa);
+//	swb2 = SQR( swb);
+//	swb3 = CUBE( swb);
+//
+//
+//	Tap[7] =  20.0 / d7;
+//	Tap[6] = -70.0 * (swa + swb) / d7;
+//	Tap[5] =  84.0 * (swa2 + 3.0*swa*swb + swb2) / d7;
+//	Tap[4] = -35.0 * (swa3 + 9.0*swa2*swb + 9.0*swa*swb2 + swb3) / d7;
+//	Tap[3] = 140.0 * (swa3*swb + 3.0*swa2*swb2 + swa*swb3) / d7;
+//	Tap[2] =-210.0 * (swa3*swb2 + swa2*swb3) / d7;
+//	Tap[1] = 140.0 * swa3 * swb3 / d7;
+//	Tap[0] = (-35.0*swa3*swb2*swb2 + 21.0*swa2*swb3*swb2 -
+//			7.0*swa*swb3*swb3 + swb3*swb3*swb) / d7;
+//
+//
+//	Hip_Init_Taper(qeq_gpu,Tap,8);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -512,6 +446,7 @@ void FixQEqReax::min_setup_pre_force(int vflag)
 
 void FixQEqReax::init_storage()
 {
+  //TODO: Make sure the function Hip_Compute_Forces and the main QEq driver function takes care of this instead.
 	int NN;
 
 	if (reaxc)
@@ -521,57 +456,63 @@ void FixQEqReax::init_storage()
 	  printf("Error at line %d at %s \n. Only REAX supported \n", __LINE__,__FILE__);
 	  exit(EXIT_FAILURE);
 	}
+//	auto Hdia_inv = reaxc->handle->workspace->Hdia_inv;
+//	auto eta = reaxc->handle->system->reax_param->s
+//	for (int i = 0; i < NN; i++) {
+////	  reaxc->handle->workspace->Hdia_inv[i] = 1.;
+//		Hdia_inv[i] = 1. / eta[atom->type[i]];
+//		b_s[i] = -chi[atom->type[i]];
+//		b_t[i] = -1.0;
+//		b_prc[i] = 0;
+//		b_prm[i] = 0;
+//		s[i] = t[i] = 0;
+//	}
 
-	for (int i = 0; i < NN; i++) {
-		Hdia_inv[i] = 1. / eta[atom->type[i]];
-		b_s[i] = -chi[atom->type[i]];
-		b_t[i] = -1.0;
-		b_prc[i] = 0;
-		b_prm[i] = 0;
-		s[i] = t[i] = 0;
-	}
 
-
-	HipInitStorageForFixQeq(qeq_gpu, Hdia_inv, b_s, b_t, b_prc, b_prm, s, t,NN);
+//	HipInitStorageForFixQeq(qeq_gpu, Hdia_inv, b_s, b_t, b_prc, b_prm, s, t,NN);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixQEqReax::pre_force(int /*vflag*/)
 {
-	double t_start, t_end;
-
-	if (update->ntimestep % nevery) return;
-	if (comm->me == 0) t_start = MPI_Wtime();
-
-	n = atom->nlocal;
-	N = atom->nlocal + atom->nghost;
-
-	// grow arrays if necessary
-	// need to be atom->nmax in length
-
-	if (atom->nmax > nmax) reallocate_storage();
-	if (n > n_cap*DANGER_ZONE || m_fill > m_cap*DANGER_ZONE)
-		reallocate_matrix();
-
-	init_matvec();
-
-
-	matvecs_s = Hip_CG(qeq_gpu->b_s, qeq_gpu->s);       // CG on s - parallel
-	matvecs_t = Hip_CG(qeq_gpu->b_t, qeq_gpu->t);       // CG on t - parallel
-
-	matvecs = matvecs_s + matvecs_t;
-
-
-
-	hip_calculate_Q();
-
-
-
-	if (comm->me == 0) {
-		t_end = MPI_Wtime();
-		qeq_time = t_end - t_start;
-	}
+  //TODO: check if the atom data structure from LAMMPS needs to keep the handle data structure in loop somehow
+  auto handle = reaxc->handle;
+  Hip_Compute_Charges(handle->system, handle->control, handle->data, handle->workspace, handle->out_control,
+                      handle->mpi_data);
+//	double t_start, t_end;
+//
+//	if (update->ntimestep % nevery) return;
+//	if (comm->me == 0) t_start = MPI_Wtime();
+//
+//	n = atom->nlocal;
+//	N = atom->nlocal + atom->nghost;
+//
+//	// grow arrays if necessary
+//	// need to be atom->nmax in length
+//
+//	if (atom->nmax > nmax) reallocate_storage();
+//	if (n > n_cap*DANGER_ZONE || m_fill > m_cap*DANGER_ZONE)
+//		reallocate_matrix();
+//
+//	init_matvec();
+//
+//
+//	matvecs_s = Hip_CG(qeq_gpu->b_s, qeq_gpu->s);       // CG on s - parallel
+//	matvecs_t = Hip_CG(qeq_gpu->b_t, qeq_gpu->t);       // CG on t - parallel
+//
+//	matvecs = matvecs_s + matvecs_t;
+//
+//
+//
+//	hip_calculate_Q();
+//
+//
+//
+//	if (comm->me == 0) {
+//		t_end = MPI_Wtime();
+//		qeq_time = t_end - t_start;
+//	}
 }
 
 /* ---------------------------------------------------------------------- */
@@ -592,13 +533,15 @@ void FixQEqReax::min_pre_force(int vflag)
 
 void FixQEqReax::init_matvec()
 {
+// TODO: Not sure why Hip_Reallocate is called here. This is very likely a removable piece of code
 
+  int oldN = reaxc->handle->system->N;
+  reaxc->handle->system->N = list->inum + list->gnum;
 
-  int oldN = reaxc->system->N;
-  reaxc->system->N = list->inum + list->gnum;
-
-  Hip_Reallocate_Part1(reaxc->system, reaxc->control,reaxc->data, reaxc->workspace, reaxc->gpu_lists, nullptr);
-  Hip_Reallocate_Part2(reaxc->system, reaxc->control,reaxc->data, reaxc->workspace, reaxc->gpu_lists, nullptr);
+  Hip_Reallocate_Part1(reaxc->handle->system, reaxc->handle->control,reaxc->handle->data, reaxc->handle->workspace,
+                       reaxc->handle->lists, nullptr);
+  Hip_Reallocate_Part2(reaxc->handle->system, reaxc->handle->control,reaxc->handle->data, reaxc->handle->workspace,
+                       reaxc->handle->lists, nullptr);
   //
 	/* fill-in H matrix */
 	compute_H();
@@ -614,12 +557,12 @@ void FixQEqReax::init_matvec()
 		exit(EXIT_FAILURE);
 	}
 
-
-	Hip_Init_Matvec_Fix(nn, qeq_gpu,reaxc->system);
-
-
-	Hip_Copy_Vector_From_Device(s,qeq_gpu->s,nn);
-	Hip_Copy_Vector_From_Device(t,qeq_gpu->t,nn);
+//
+//  Hip_Init_MatVec_Fix(nn, qeq_gpu, reaxc->handle->system);
+//
+//
+//	Hip_Copy_Vector_From_Device(s,qeq_gpu->s,nn);
+//	Hip_Copy_Vector_From_Device(t,qeq_gpu->t,nn);
 
 
 	pack_flag = 2;
@@ -632,17 +575,17 @@ void FixQEqReax::init_matvec()
 /*-----------------------------------------------------------------------*/
 void FixQEqReax::intializeAtomsAndCopyToDevice()
 {
-
-	qeq_gpu->fix_my_atoms = (reax_atom*) malloc(reaxc->system->N * sizeof(reax_atom));
-	for( int i = 0; i < reaxc->system->N; ++i ){
-		qeq_gpu->fix_my_atoms[i].orig_id = atom->tag[i];
-		qeq_gpu->fix_my_atoms[i].type = atom->type[i];
-		qeq_gpu->fix_my_atoms[i].x[0] = atom->x[i][0];
-		qeq_gpu->fix_my_atoms[i].x[1] = atom->x[i][1];
-		qeq_gpu->fix_my_atoms[i].x[2] = atom->x[i][2];
-		qeq_gpu->fix_my_atoms[i].q = atom->q[i];
+  //TODO: Remove, it is not used, if other functions that call this are removed as well.
+  auto my_atoms = reaxc->handle->system->my_atoms;
+	for( int i = 0; i < reaxc->handle->system->N; ++i ){
+		my_atoms[i].orig_id = atom->tag[i];
+		my_atoms[i].type = atom->type[i];
+		my_atoms[i].x[0] = atom->x[i][0];
+		my_atoms[i].x[1] = atom->x[i][1];
+		my_atoms[i].x[2] = atom->x[i][2];
+		my_atoms[i].q = atom->q[i];
 	}
-	Hip_Init_Fix_Atoms(reaxc->system, qeq_gpu);
+//	Hip_Init_Fix_Atoms(reaxc->handle->system, qeq_gpu);
 }
 
 
@@ -681,7 +624,7 @@ int FixQEqReax::updateReaxLists(PairReaxFFHIP *reaxc)
 	reax_list *far_nbrs;
 	far_neighbor_data far_list;
 
-	reaxc->system->N = list->inum + list->gnum;
+	reaxc->handle->system->N = list->inum + list->gnum;
 
 
 	x = atom->x;
@@ -689,13 +632,13 @@ int FixQEqReax::updateReaxLists(PairReaxFFHIP *reaxc)
 	numneigh = list->numneigh;
 	firstneigh = list->firstneigh;
 
-	far_nbrs = (reaxc->cpu_lists +FAR_NBRS);
-	far_list = far_nbrs->far_nbr_list;
+//	far_nbrs = (reaxc->handle->cpu_lists +FAR_NBRS);
+//	far_list = far_nbrs->far_nbr_list;
 
 
 	num_nbrs = 0;
 	int inum = list->inum;
-	dist = (double*) calloc( reaxc->system->N, sizeof(double) );
+	dist = (double*) calloc( reaxc->handle->system->N, sizeof(double) );
 
 	int numall = list->inum + list->gnum;
 
@@ -709,9 +652,9 @@ int FixQEqReax::updateReaxLists(PairReaxFFHIP *reaxc)
 		Set_Start_Index( i, num_nbrs, far_nbrs );
 
 		if (i < inum)
-			cutoff_sqr = reaxc->control->nonb_cut * reaxc->control->nonb_cut;
+			cutoff_sqr = reaxc->handle->control->nonb_cut * reaxc->handle->control->nonb_cut;
 		else
-			cutoff_sqr = reaxc->control->bond_cut * reaxc->control->bond_cut;
+			cutoff_sqr = reaxc->handle->control->bond_cut * reaxc->handle->control->bond_cut;
 
 		for( itr_j = 0; itr_j < numneigh[i]; ++itr_j ) {
 			j = jlist[itr_j];
@@ -750,7 +693,7 @@ int FixQEqReax::updateReaxLists(PairReaxFFHIP *reaxc)
 	//printf("freeing\n");
 	free( dist );
 
-	Hip_Copy_Far_Neighbors_List_Host_to_Device(reaxc->system,  reaxc->gpu_lists, reaxc->cpu_lists);
+//	Hip_Copy_Far_Neighbors_List_Host_to_Device(reaxc->handle->system,  reaxc->handle->lists, reaxc->handle->cpu_lists);
 	return num_nbrs;
 }
 
@@ -758,6 +701,8 @@ int FixQEqReax::updateReaxLists(PairReaxFFHIP *reaxc)
 /* ---------------------------------------------------------------------- */
 
 void FixQEqReax::compute_H()
+//TODO: Not needed anymore. Take a look at sparse_approx_inverse, Compute_Preconditioner_QEq, and Setup_Preconditioner_QEq
+// for potential replacements
 {
 	int inum, jnum, *ilist, *jlist, *numneigh, **firstneigh;
 	int i, j, ii, jj, flag;
@@ -779,18 +724,19 @@ void FixQEqReax::compute_H()
 		exit(EXIT_FAILURE);
 	}
 
-	intializeAtomsAndCopyToDevice();
-	updateReaxLists(reaxc);
-	Hip_Estimate_CMEntries_Storages(reaxc->system, reaxc->control,reaxc->gpu_lists, qeq_gpu, inum);
-	Hip_Allocate_Matrix(&qeq_gpu->H, inum, nmax, reaxc->system->total_cm_entries, SYM_FULL_MATRIX);
-	Hip_Init_Sparse_Matrix_Indices(reaxc->system, &qeq_gpu->H);
-	Hip_Calculate_H_Matrix(reaxc->gpu_lists, reaxc->system,qeq_gpu,reaxc->control,inum);
+//	intializeAtomsAndCopyToDevice();
+//	updateReaxLists(reaxc);
+//	Hip_Estimate_CMEntries_Storages(reaxc->system, reaxc->control,reaxc->gpu_lists, qeq_gpu, inum);
+//	Hip_Allocate_Matrix(&qeq_gpu->H, inum, nmax, reaxc->system->total_cm_entries, SYM_FULL_MATRIX);
+//	Hip_Init_Sparse_Matrix_Indices(reaxc->system, &qeq_gpu->H);
+//	Hip_Calculate_H_Matrix(reaxc->gpu_lists, reaxc->system,qeq_gpu,reaxc->control,inum);
 
 
 }
 
 
 int FixQEqReax::Hip_CG( double *device_b, double *device_x)
+//TODO: this is not needed, the CG function from puremd has this implemented
 {
 	int  i, j, imax;
 	double tmp, alpha, beta, b_norm;
@@ -808,85 +754,84 @@ int FixQEqReax::Hip_CG( double *device_b, double *device_x)
 
 	imax = 200;
 	pack_flag = 1;
-
-	hip_sparse_matvec(device_x, qeq_gpu->q);
-
-	Hip_Vector_Sum_Fix(qeq_gpu->r , 1.0,  device_b, -1.0,
-			qeq_gpu->q, nn);
-	Hip_CG_Preconditioner_Fix(qeq_gpu->d, qeq_gpu->r,
-			qeq_gpu->Hdia_inv,  nn);
-
-
-
-
-
-	real *b;
-	memory->create(b,nn,"b_temp");
-	Hip_Copy_Vector_From_Device(b,device_b,nn);
-	b_norm = parallel_norm( b, nn);
-
-
-
-	Hip_Copy_Vector_From_Device(r,qeq_gpu->r,nn);
-	Hip_Copy_Vector_From_Device(d,qeq_gpu->d,nn);
-	sig_new = parallel_dot(r,d,nn);
-
-
-
-	for (i = 1; i < imax && sqrt(sig_new) / b_norm > tolerance; ++i) {
-
-		comm->forward_comm_fix(this);
-
-
-		hip_sparse_matvec(qeq_gpu->d, qeq_gpu->q);
-
-
-		Hip_Copy_Vector_From_Device(d,qeq_gpu->d,nn);
-		Hip_Copy_Vector_From_Device(q,qeq_gpu->q,nn);
-
-
-		tmp = parallel_dot( d, q, nn);
-
-		alpha = sig_new / tmp;
-
-
-		Hip_Vector_Sum_Fix(device_x , alpha,  qeq_gpu->d, 1.0, device_x, nn);
-		Hip_Vector_Sum_Fix(qeq_gpu->r, -alpha, qeq_gpu->q, 1.0,qeq_gpu->r,nn);
-
-
-		Hip_Copy_Vector_From_Device(r,qeq_gpu->r,nn);
-		Hip_Copy_Vector_From_Device(p,qeq_gpu->p,nn);
-
-
-		Hip_CG_Preconditioner_Fix(qeq_gpu->p,qeq_gpu->r,qeq_gpu->Hdia_inv,nn);
-
-		sig_old = sig_new;
-
-		Hip_Copy_Vector_From_Device(r,qeq_gpu->r,nn);
-		Hip_Copy_Vector_From_Device(p,qeq_gpu->p,nn);
-
-		sig_new = parallel_dot( r, p, nn);
-		beta = sig_new / sig_old;
-
-		Hip_Vector_Sum_Fix(qeq_gpu->d, 1.,qeq_gpu->p,beta,qeq_gpu->d,nn);
-
-	}
-
-
-	if (i >= imax && comm->me == 0) {
-		char str[128];
-		sprintf(str,"Fix qeq/reax CG convergence failed after %d iterations "
-				"at " BIGINT_FORMAT " step",i,update->ntimestep);
-		error->warning(FLERR,str);
-	}
-
-	return i;
+//
+//	hip_sparse_matvec(device_x, qeq_gpu->q);
+//
+//	Hip_Vector_Sum_Fix(qeq_gpu->r , 1.0,  device_b, -1.0, qeq_gpu->q, nn);
+//	Hip_CG_Preconditioner_Fix(qeq_gpu->d, qeq_gpu->r, qeq_gpu->Hdia_inv,  nn);
+//
+//
+//
+//
+//
+//	real *b;
+//	memory->create(b,nn,"b_temp");
+//	Hip_Copy_Vector_From_Device(b,device_b,nn);
+//	b_norm = parallel_norm( b, nn);
+//
+//
+//
+//	Hip_Copy_Vector_From_Device(r,qeq_gpu->r,nn);
+//	Hip_Copy_Vector_From_Device(d,qeq_gpu->d,nn);
+//	sig_new = parallel_dot(r,d,nn);
+//
+//
+//
+//	for (i = 1; i < imax && sqrt(sig_new) / b_norm > tolerance; ++i) {
+//
+//		comm->forward_comm_fix(this);
+//
+//
+//		hip_sparse_matvec(qeq_gpu->d, qeq_gpu->q);
+//
+//
+//		Hip_Copy_Vector_From_Device(d,qeq_gpu->d,nn);
+//		Hip_Copy_Vector_From_Device(q,qeq_gpu->q,nn);
+//
+//
+//		tmp = parallel_dot( d, q, nn);
+//
+//		alpha = sig_new / tmp;
+//
+//
+//		Hip_Vector_Sum_Fix(device_x , alpha,  qeq_gpu->d, 1.0, device_x, nn);
+//		Hip_Vector_Sum_Fix(qeq_gpu->r, -alpha, qeq_gpu->q, 1.0,qeq_gpu->r,nn);
+//
+//
+//		Hip_Copy_Vector_From_Device(r,qeq_gpu->r,nn);
+//		Hip_Copy_Vector_From_Device(p,qeq_gpu->p,nn);
+//
+//
+//		Hip_CG_Preconditioner_Fix(qeq_gpu->p,qeq_gpu->r,qeq_gpu->Hdia_inv,nn);
+//
+//		sig_old = sig_new;
+//
+//		Hip_Copy_Vector_From_Device(r,qeq_gpu->r,nn);
+//		Hip_Copy_Vector_From_Device(p,qeq_gpu->p,nn);
+//
+//		sig_new = parallel_dot( r, p, nn);
+//		beta = sig_new / sig_old;
+//
+//		Hip_Vector_Sum_Fix(qeq_gpu->d, 1.,qeq_gpu->p,beta,qeq_gpu->d,nn);
+//
+//	}
+//
+//
+//	if (i >= imax && comm->me == 0) {
+//		char str[128];
+//		sprintf(str,"Fix qeq/reax CG convergence failed after %d iterations "
+//				"at " BIGINT_FORMAT " step",i,update->ntimestep);
+//		error->warning(FLERR,str);
+//	}
+//
+//	return i;
 }
 
 
 /* ---------------------------------------------------------------------- */
 void FixQEqReax::hip_sparse_matvec(double *x, double *q)
 {
+  //TODO: Remove this, it's a worse version of Sparse_MatVec
 	int i, j, itr_j;
 	int nn, NN, ii;
 	int *ilist;
@@ -900,7 +845,7 @@ void FixQEqReax::hip_sparse_matvec(double *x, double *q)
 		exit(EXIT_FAILURE);
 	}
 
-	Hip_Sparse_Matvec_Compute(&qeq_gpu->H, x, q ,qeq_gpu->eta, qeq_gpu->d_fix_my_atoms, nn, NN);
+//	Hip_Sparse_Matvec_Compute(&qeq_gpu->H, x, q ,qeq_gpu->eta, qeq_gpu->d_fix_my_atoms, nn, NN);
 }
 
 
@@ -909,49 +854,51 @@ void FixQEqReax::hip_sparse_matvec(double *x, double *q)
 /* ---------------------------------------------------------------------- */
 
 void FixQEqReax::hip_calculate_Q()
+//TODO: not needed anymore, the function Calculate_Charges_QEq is its replacement. Only keep the part that
+// is communicating between the atom data structure and the puremd_handle's atoms to transfer q
 {
-	int i, k;
-	double u;
-	double *q = atom->q;
-
-	int nn, ii;
-	int *ilist;
-
-	if (reaxc) {
-		nn = reaxc->list->inum;
-		ilist = reaxc->list->ilist;
-	} else {
-		nn = list->inum;
-		ilist = list->ilist;
-	}
-
-	double res_s_sum,res_t_sum = 0.0;
-
-	double s_sum = Hip_Calculate_Local_S_Sum(nn,qeq_gpu);
-	MPI_Allreduce( &s_sum, &res_s_sum, 1, MPI_DOUBLE, MPI_SUM, world);
-
-	double t_sum = Hip_Calculate_Local_T_Sum(nn,qeq_gpu);
-	MPI_Allreduce( &t_sum, &res_t_sum, 1, MPI_DOUBLE, MPI_SUM, world);
-
-
-	u = res_s_sum / res_t_sum;
-
-	Hip_Update_Q_And_Backup_ST(nn,qeq_gpu,u,reaxc->system);
-
-
-	for( int i = 0; i < reaxc->system->N; ++i ){
-		atom->q[i] = qeq_gpu->fix_my_atoms[i].q;
-	}
-
-	pack_flag = 4;
-	comm->forward_comm_fix(this); //Dist_vector( atom->q );
-
-	//Debug start
-	int world_rank;
-	MPI_Comm_rank(world, &world_rank);
-	//Debug end
-
-	Hip_Free_Memory(qeq_gpu);
+//	int i, k;
+//	double u;
+//	double *q = atom->q;
+//
+//	int nn, ii;
+//	int *ilist;
+//
+//	if (reaxc) {
+//		nn = reaxc->list->inum;
+//		ilist = reaxc->list->ilist;
+//	} else {
+//		nn = list->inum;
+//		ilist = list->ilist;
+//	}
+//
+//	double res_s_sum,res_t_sum = 0.0;
+//
+//	double s_sum = Hip_Calculate_Local_S_Sum(nn, qeq_gpu);
+//	MPI_Allreduce( &s_sum, &res_s_sum, 1, MPI_DOUBLE, MPI_SUM, world);
+//
+//	double t_sum = Hip_Calculate_Local_T_Sum(nn, qeq_gpu);
+//	MPI_Allreduce( &t_sum, &res_t_sum, 1, MPI_DOUBLE, MPI_SUM, world);
+//
+//
+//	u = res_s_sum / res_t_sum;
+//
+//	Hip_Update_Q_And_Backup_ST(nn,qeq_gpu,u,reaxc->system);
+//
+//
+//	for( int i = 0; i < reaxc->system->N; ++i ){
+//		atom->q[i] = qeq_gpu->fix_my_atoms[i].q;
+//	}
+//
+//	pack_flag = 4;
+//	comm->forward_comm_fix(this); //Dist_vector( atom->q );
+//
+//	//Debug start
+//	int world_rank;
+//	MPI_Comm_rank(world, &world_rank);
+//	//Debug end
+//
+//	Hip_Free_Memory(qeq_gpu);
 
 }
 
@@ -1112,36 +1059,40 @@ double FixQEqReax::parallel_vector_acc( double *v, int n)
 int FixQEqReax::pack_forward_comm(int n, int *list, double *buf,
 		int /*pbc_flag*/, int * /*pbc*/)
 {
+  //TODO: This is a communication function. It needs to be written with minimal copies between CPU and GPU. For
+  //now, it assumes the communication is indeed needed.
+  //Also make sure reaxc->handle->system->N is actually its length, in puremd it amounts to total_cap variable
 	int m;
-
+	auto workspace = reaxc->handle->workspace;
+	auto N = reaxc->handle->system->N;
 	if (pack_flag == 1)
 	{
-		Hip_Copy_Vector_From_Device(d,qeq_gpu->d, reaxc->system->N);
+		Hip_Copy_Vector_From_Device(workspace->d, workspace->d_workspace->d, N);
 		for(m = 0; m < n; m++)
 		{
-			buf[m] = d[list[m]];
+			buf[m] = workspace->d[list[m]];
 
 		}
 	}
 	else if (pack_flag == 2)
 	{
-		Hip_Copy_Vector_From_Device(s,qeq_gpu->s, reaxc->system->N);
+		Hip_Copy_Vector_From_Device(workspace->s, workspace->d_workspace->s, N);
 		for(m = 0; m < n; m++)
 		{
-			buf[m] = s[list[m]];
+			buf[m] = workspace->s[list[m]];
 		}
 	}
 	else if (pack_flag == 3)
 	{
-		Hip_Copy_Vector_From_Device(t,qeq_gpu->t, reaxc->system->N);
+		Hip_Copy_Vector_From_Device(workspace->t, workspace->d_workspace->t, N);
 		for(m = 0; m < n; m++)
 		{
-			buf[m] = t[list[m]];
+			buf[m] = workspace->t[list[m]];
 		}
 	}
 	else if (pack_flag == 4)
 	{
-		Hip_Copy_Vector_From_Device(atom->q,qeq_gpu->q, reaxc->system->N);
+		Hip_Copy_Vector_From_Device(workspace->q, workspace->d_workspace->q, N);
 		for(m = 0; m < n; m++)
 		{
 			buf[m] = atom->q[list[m]];
@@ -1150,13 +1101,6 @@ int FixQEqReax::pack_forward_comm(int n, int *list, double *buf,
 	else if (pack_flag == 5) {
 		printf("Error at line %d at %s \n. Functionality not implemented\n", __LINE__,__FILE__);
 		exit(EXIT_FAILURE);
-		m = 0;
-		for(int i = 0; i < n; i++) {
-			int j = 2 * list[i];
-			buf[m++] = d[j];
-			buf[m++] = d[j+1];
-		}
-		return m;
 	}
 	return n;
 }
@@ -1164,51 +1108,46 @@ int FixQEqReax::pack_forward_comm(int n, int *list, double *buf,
 /* ---------------------------------------------------------------------- */
 
 void FixQEqReax::unpack_forward_comm(int n, int first, double *buf)
+//TODO: Check for correction
 {
 	int i, m;
-
+  auto d_workspace = reaxc->handle->workspace->d_workspace;
 	if (pack_flag == 1)
 	{
-		Hip_Copy_To_Device_Comm_Fix(buf,qeq_gpu->d,n,first);
+		Hip_Copy_To_Device_Comm_Fix(buf, d_workspace->d, n, first);
 	}
 	else if (pack_flag == 2)
 	{
-		Hip_Copy_To_Device_Comm_Fix(buf,qeq_gpu->s,n,first);
+		Hip_Copy_To_Device_Comm_Fix(buf, d_workspace->s, n, first);
 	}
 	else if (pack_flag == 3)
 	{
-		Hip_Copy_To_Device_Comm_Fix(buf,qeq_gpu->t,n,first);
+		Hip_Copy_To_Device_Comm_Fix(buf, d_workspace->t, n, first);
 	}
 	else if (pack_flag == 4)
 	{
-		Hip_Copy_To_Device_Comm_Fix(buf,qeq_gpu->q,n,first);
+		Hip_Copy_To_Device_Comm_Fix(buf, d_workspace->q, n, first);
 	}
 	else if (pack_flag == 5) {
 		printf("Error at line %d at %s \n. Functionality not implemented\n", __LINE__,__FILE__);
 		exit(EXIT_FAILURE);
-
-		int last = first + n;
-		m = 0;
-		for(i = first; i < last; i++) {
-			int j = 2 * i;
-			d[j  ] = buf[m++];
-			d[j+1] = buf[m++];
-		}
-	}
+  }
 }
 
 /* ---------------------------------------------------------------------- */
 
 int FixQEqReax::pack_reverse_comm(int n, int first, double *buf)
 {
+  //TODO: Check for correctness
 	int i, m;
+	auto workspace = reaxc->handle->workspace;
 	if (pack_flag == 5) {
 		m = 0;
 		int last = first + n;
 		for(i = first; i < last; i++) {
 			int indxI = 2 * i;
-			buf[m++] = q[indxI  ];
-			buf[m++] = q[indxI+1];
+			buf[m++] = workspace->q[indxI  ];
+			buf[m++] = workspace->q[indxI+1];
 		}
 		printf("Error at line %d at %s \n. Functionality not implemented\n", __LINE__,__FILE__);
 		exit(EXIT_FAILURE);
@@ -1216,7 +1155,7 @@ int FixQEqReax::pack_reverse_comm(int n, int first, double *buf)
 	}
 	else
 	{
-	    Hip_Copy_From_Device_Comm_Fix(buf,qeq_gpu->q,n,first);
+	    Hip_Copy_From_Device_Comm_Fix(buf, workspace->d_workspace->q,n,first);
 		return n;
 	}
 }
@@ -1225,12 +1164,14 @@ int FixQEqReax::pack_reverse_comm(int n, int first, double *buf)
 
 void FixQEqReax::unpack_reverse_comm(int n, int *list, double *buf)
 {
+  //TODO: Check for correctness
+  auto workspace = reaxc->handle->workspace;
 	if (pack_flag == 5) {
 		int m = 0;
 		for(int i = 0; i < n; i++) {
 			int indxI = 2 * list[i];
-			q[indxI  ] += buf[m++];
-			q[indxI+1] += buf[m++];
+			workspace->q[indxI  ] += buf[m++];
+			workspace->q[indxI+1] += buf[m++];
 		}
 		printf("Error at line %d at %s \n. Functionality not implemented\n", __LINE__,__FILE__);
 		exit(EXIT_FAILURE);
@@ -1239,10 +1180,10 @@ void FixQEqReax::unpack_reverse_comm(int n, int *list, double *buf)
 	{
 	  for (int m = 0; m < n; m++)
 		{
-			q[list[m]] += buf[m];
+			workspace->q[list[m]] += buf[m];
 		}
 
-		Hip_Copy_Vector_To_Device(q,qeq_gpu->q,n);
+		Hip_Copy_Vector_To_Device(workspace->q, workspace->d_workspace->q, n);
 	}
 }
 
@@ -1251,6 +1192,7 @@ void FixQEqReax::unpack_reverse_comm(int n, int *list, double *buf)
 void FixQEqReax::vector_sum( double* dest, double c, double* v,
 		double d, double* y, int k)
 {
+  //TODO: Remove, it is unused
 	int kk;
 	int *ilist;
 
@@ -1270,6 +1212,7 @@ void FixQEqReax::vector_sum( double* dest, double c, double* v,
 
 void FixQEqReax::vector_add( double* dest, double c, double* v, int k)
 {
+  //TODO: Remove, it's unused
 	int kk;
 	int *ilist;
 

@@ -2407,7 +2407,7 @@ struct reax_list
 /**/
 struct output_controls
 {
-#if defined(PURE_REAX)
+#if defined(PURE_REAX) || defined(LAMMPS_REAX)
     /**/
     MPI_File trj;
 #endif

@@ -30,17 +30,21 @@
   #include "comm_tools.h"
   #include "tool_box.h"
   #include "vector.h"
+  #if defined(HAVE_HIP)
+    #include "hip/hip_copy.h"
+  #endif
 #elif defined(LAMMPS_REAX)
   #include "reaxff_system_props.h"
 
   #include "reaxff_comm_tools.h"
   #include "reaxff_tool_box.h"
   #include "reaxff_vector.h"
+  #if defined(HAVE_HIP)
+    #include "reaxff_hip_copy.h"
+  #endif
 #endif
 
-#if defined(HAVE_HIP)
-  #include "hip/hip_copy.h"
-#endif
+
 
 
 void Temperature_Control( control_params *control, simulation_data *data )

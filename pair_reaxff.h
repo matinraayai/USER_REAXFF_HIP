@@ -12,9 +12,10 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Trinayan Baruah, Northeastern University(baruah.t@northeastern.edu)
-                        Nicholas Curtis, AMD(nicholas.curtis@amd.com)
-			                  David Kaeli,     Northeastern University(kaeli@ece.neu.edu)
+   Contributing authors: Trinayan Baruah,       Northeastern University(baruah.t@northeastern.edu)
+                         Matin Raayai Ardakani, Northeastern University(raayaiardakani.m@northeastern.edu)
+                         Nicholas Curtis,       AMD(nicholas.curtis@amd.com)
+			                   David Kaeli,           Northeastern University(kaeli@ece.neu.edu)
    Please cite the related publication:
    H. M. Aktulga, J. C. Fogarty, S. A. Pandit, A. Y. Grama,
    "Parallel Reactive Molecular Dynamics: Numerical Methods and
@@ -36,6 +37,7 @@
 namespace LAMMPS_NS {
 
 class PairReaxFFHIP : public Pair {
+    friend class FixQEqReax;
   public:
     explicit PairReaxFFHIP(class LAMMPS *);
 
@@ -51,7 +53,7 @@ class PairReaxFFHIP : public Pair {
 
     double init_one(int, int) override;
 
-    void *extract(const char *, int &) override;
+    void* extract(const char *, int &) override;
 
     int fixbond_flag, fixspecies_flag;
 
@@ -59,51 +61,42 @@ class PairReaxFFHIP : public Pair {
 
     double **tmpbo, **tmpr;
 
-    control_params *control;
-
-    reax_system *system;
-
-    output_controls *out_control;
-
-    simulation_data *data;
-
-    storage *workspace;
-
-    reax_list **gpu_lists;
-
-    reax_list *cpu_lists;
-
-    mpi_datatypes *mpi_data;
 
     bigint ngroup;
 
     protected:
+      puremd_handle *handle;
       char *fix_id;
       double cutmax;
       int nelements;                // # of unique elements
       char **elements;              // names of unique elements
       int *map;
-      class FixReaxC *fix_reax;
+      class FixReaxC *fix_reax; //TODO: why is the CPU implementation of REAXC used here? This should not be here anymore.
 
-      double *chi,*eta,*gamma;
+      double *chi, *eta, *gamma;
       int qeqflag;
+      int lgflag;
+      int enobondsflag = 1;
+      int min_cap = MIN_CAP;
+      double safezone = SAFE_ZONE;
+      double saferzone = SAFER_ZONE;
       int setup_flag;
       int firstwarn;
 
       void allocate();
-      void setup();
-      void create_compute();
-      void create_fix();
+      void setup() override;
+      void create_compute(); //TODO: Remove or implement
+      void create_fix(); //TODO: Remove or implement
       void update_and_copy_reax_atoms_to_device();
-      int update_and_write_reax_lists_to_device();
+      int update_and_write_reax_lists_to_device(); //TODO: remove or implement
       void get_distance(rvec, rvec, double *, rvec *);
       void set_far_nbr(far_neighbor_data *, int, int, double, rvec);
       int estimate_reax_lists();
       void read_reax_forces_from_device(int);
 
       int nmax;
-      void FindBond();
-      double memory_usage();
+      void FindBond(); //TODO: remove or implement
+      double memory_usage() override;
 
 };
 

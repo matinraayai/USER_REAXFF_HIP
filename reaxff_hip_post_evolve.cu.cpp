@@ -1,6 +1,6 @@
 #include "hip/hip_runtime.h"
 
-#if defined(LAMMPS_AREX)
+#if defined(LAMMPS_REAX)
     #include "reaxff_hip_post_evolve.h"
 
     #include "reaxff_hip_utils.h"

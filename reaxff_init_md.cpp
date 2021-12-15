@@ -46,10 +46,16 @@
   #include "reaxff_init_md.h"
 
   #include "reaxff_allocate.h"
+  #include "reaxff_box.h"
+  #include "reaxff_comm_tools.h"
   #include "reaxff_forces.h"
+  #include "reaxff_grid.h"
+  #include "reaxff_integrate.h"
   #include "reaxff_io_tools.h"
   #include "reaxff_list.h"
   #include "reaxff_lookup.h"
+  #include "reaxff_neighbors.h"
+  #include "reaxff_random.h"
   #include "reaxff_reset_tools.h"
   #include "reaxff_system_props.h"
   #include "reaxff_tool_box.h"
@@ -761,11 +767,11 @@ void Initialize( reax_system * const system, control_params * const control,
     /* reset for step 0 */
     Reset_Simulation_Data( data );
 
-    Init_Workspace( system, control, workspace );
+    Init_Workspace( system, control, workspace, mpi_data );
 
     Init_MPI_Datatypes( system, workspace, mpi_data );
 
-    Init_Lists( system, control, workspace, lists );
+    Init_Lists( system, control, data, workspace, lists, mpi_data );
 
     Init_Output_Files( system, control, out_control, mpi_data );
 
@@ -774,7 +780,7 @@ void Initialize( reax_system * const system, control_params * const control,
         Make_LR_Lookup_Table( system, control, workspace, mpi_data );
     }
 
-    Init_Force_Functions( );
+    Init_Force_Functions( control );
     }
 #endif
 

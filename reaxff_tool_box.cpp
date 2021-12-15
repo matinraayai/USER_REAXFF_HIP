@@ -29,7 +29,7 @@
 
     #include "comm_tools.h"
 #elif defined(LAMMPS_REAX)
-    #include "reaxff_hip_tool_box.h"
+    #include "reaxff_tool_box.h"
     #include "reaxff_comm_tools.h"
     #include "error.h"
 #endif

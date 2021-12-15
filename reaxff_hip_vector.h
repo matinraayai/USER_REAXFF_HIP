@@ -19,12 +19,18 @@
   <http://www.gnu.org/licenses/>.
   ----------------------------------------------------------------------*/
 
-#ifndef __CUDA_VECTOR_H_
-#define __CUDA_VECTOR_H_
+#ifndef __HIP_VECTOR_H_
+#define __HIP_VECTOR_H_
 
-#include "../reax_types.h"
+#if defined(LAMMPS_REAX)
+    #include "reaxff_types.h"
+    #include "reaxff_hip_random.h"
+#else
+    #include "reax_types.h"
+    #include "hip_random.h"
+#endif
 
-#include "hip_random.h"
+
 
 
 HIP_DEVICE static inline void hip_rvec_Random( rvec v )

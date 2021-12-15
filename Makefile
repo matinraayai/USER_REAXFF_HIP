@@ -9081,6 +9081,30 @@ reaxff_allocate.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_allocate.cpp.s
 .PHONY : reaxff_allocate.cpp.s
 
+reaxff_analyze.o: reaxff_analyze.cpp.o
+.PHONY : reaxff_analyze.o
+
+# target to build an object file
+reaxff_analyze.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_analyze.cpp.o
+.PHONY : reaxff_analyze.cpp.o
+
+reaxff_analyze.i: reaxff_analyze.cpp.i
+.PHONY : reaxff_analyze.i
+
+# target to preprocess a source file
+reaxff_analyze.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_analyze.cpp.i
+.PHONY : reaxff_analyze.cpp.i
+
+reaxff_analyze.s: reaxff_analyze.cpp.s
+.PHONY : reaxff_analyze.s
+
+# target to generate assembly for a file
+reaxff_analyze.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_analyze.cpp.s
+.PHONY : reaxff_analyze.cpp.s
+
 reaxff_basic_comm.o: reaxff_basic_comm.cpp.o
 .PHONY : reaxff_basic_comm.o
 
@@ -9296,6 +9320,30 @@ reaxff_forces.s: reaxff_forces.cpp.s
 reaxff_forces.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_forces.cpp.s
 .PHONY : reaxff_forces.cpp.s
+
+reaxff_geo_tools.o: reaxff_geo_tools.cpp.o
+.PHONY : reaxff_geo_tools.o
+
+# target to build an object file
+reaxff_geo_tools.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_geo_tools.cpp.o
+.PHONY : reaxff_geo_tools.cpp.o
+
+reaxff_geo_tools.i: reaxff_geo_tools.cpp.i
+.PHONY : reaxff_geo_tools.i
+
+# target to preprocess a source file
+reaxff_geo_tools.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_geo_tools.cpp.i
+.PHONY : reaxff_geo_tools.cpp.i
+
+reaxff_geo_tools.s: reaxff_geo_tools.cpp.s
+.PHONY : reaxff_geo_tools.s
+
+# target to generate assembly for a file
+reaxff_geo_tools.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_geo_tools.cpp.s
+.PHONY : reaxff_geo_tools.cpp.s
 
 reaxff_grid.o: reaxff_grid.cpp.o
 .PHONY : reaxff_grid.o
@@ -10232,6 +10280,30 @@ reaxff_nonbonded.s: reaxff_nonbonded.cpp.s
 reaxff_nonbonded.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_nonbonded.cpp.s
 .PHONY : reaxff_nonbonded.cpp.s
+
+reaxff_puremd.o: reaxff_puremd.cpp.o
+.PHONY : reaxff_puremd.o
+
+# target to build an object file
+reaxff_puremd.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_puremd.cpp.o
+.PHONY : reaxff_puremd.cpp.o
+
+reaxff_puremd.i: reaxff_puremd.cpp.i
+.PHONY : reaxff_puremd.i
+
+# target to preprocess a source file
+reaxff_puremd.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_puremd.cpp.i
+.PHONY : reaxff_puremd.cpp.i
+
+reaxff_puremd.s: reaxff_puremd.cpp.s
+.PHONY : reaxff_puremd.s
+
+# target to generate assembly for a file
+reaxff_puremd.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/lmp_hip.dir/build.make CMakeFiles/lmp_hip.dir/reaxff_puremd.cpp.s
+.PHONY : reaxff_puremd.cpp.s
 
 reaxff_random.o: reaxff_random.cpp.o
 .PHONY : reaxff_random.o
@@ -12369,6 +12441,9 @@ help:
 	@echo "... reaxff_allocate.o"
 	@echo "... reaxff_allocate.i"
 	@echo "... reaxff_allocate.s"
+	@echo "... reaxff_analyze.o"
+	@echo "... reaxff_analyze.i"
+	@echo "... reaxff_analyze.s"
 	@echo "... reaxff_basic_comm.o"
 	@echo "... reaxff_basic_comm.i"
 	@echo "... reaxff_basic_comm.s"
@@ -12396,6 +12471,9 @@ help:
 	@echo "... reaxff_forces.o"
 	@echo "... reaxff_forces.i"
 	@echo "... reaxff_forces.s"
+	@echo "... reaxff_geo_tools.o"
+	@echo "... reaxff_geo_tools.i"
+	@echo "... reaxff_geo_tools.s"
 	@echo "... reaxff_grid.o"
 	@echo "... reaxff_grid.i"
 	@echo "... reaxff_grid.s"
@@ -12513,6 +12591,9 @@ help:
 	@echo "... reaxff_nonbonded.o"
 	@echo "... reaxff_nonbonded.i"
 	@echo "... reaxff_nonbonded.s"
+	@echo "... reaxff_puremd.o"
+	@echo "... reaxff_puremd.i"
+	@echo "... reaxff_puremd.s"
 	@echo "... reaxff_random.o"
 	@echo "... reaxff_random.i"
 	@echo "... reaxff_random.s"

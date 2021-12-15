@@ -20,14 +20,14 @@
   ----------------------------------------------------------------------*/
 
 #if defined(LAMMPS_REAX)
-    #include "hip_torsion_angles.h"
+    #include "reaxff_hip_torsion_angles.h"
 
-    #include "hip_list.h"
-    #include "hip_helpers.h"
-    #include "hip_utils.h"
+    #include "reaxff_hip_list.h"
+    #include "reaxff_hip_helpers.h"
+    #include "reaxff_hip_utils.h"
 
-    #include "../index_utils.h"
-    #include "../vector.h"
+    #include "reaxff_index_utils.h"
+    #include "reaxff_vector.h"
 #else
     #include "hip_torsion_angles.h"
 

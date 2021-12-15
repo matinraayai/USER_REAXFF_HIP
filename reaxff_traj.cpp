@@ -30,18 +30,22 @@
   #include "comm_tools.h"
   #include "list.h"
   #include "tool_box.h"
+  #if defined(HAVE_HIP)
+    #include "hip/hip_copy.h"
+  #endif
 #elif defined(LAMMPS_REAX)
-  #include "reaxff_hip_traj.h"
+  #include "reaxff_traj.h"
 
-  #include "reaxff_hip_comm_tools.h"
-  #include "reaxff_hip_list.h"
-  #include "reaxff_hip_tool_box.h"
+  #include "reaxff_comm_tools.h"
+  #include "reaxff_list.h"
+  #include "reaxff_tool_box.h"
   #include "error.h"
+  #if defined(HAVE_HIP)
+    #include "reaxff_hip_copy.h"
+  #endif
 #endif
 
-#if defined(HAVE_HIP)
-  #include "hip/hip_copy.h"
-#endif
+
 
 
 int Set_My_Trajectory_View( MPI_File trj, int offset, MPI_Datatype etype,
